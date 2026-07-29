@@ -125,8 +125,8 @@ full layouts wins.
 
 ### Residual absorption
 
-Binary search converges just under `H`, leaving residual `r`. Distribute it proportionally
-to row heights, `δₖ = r · hₖ / Σh`, which yields a useful identity:
+The window search lands at or just under `H`, leaving residual `r`. Distribute it
+proportionally to row heights, `δₖ = r · hₖ / Σh`, which yields a useful identity:
 
 ```
 crop fraction = r / (Σh + r)     — identical for every row
