@@ -226,9 +226,24 @@ incremental.
 
 ## Ordering
 
-Auto-layout respects input order. A separate explicit "auto-arrange" action reorders photos
-to improve packing. Keeping these separate means drag-to-reorder is never silently undone
-by the packer.
+Auto-layout respects input order, and drag-to-reorder is therefore never silently undone by
+the packer.
+
+An "auto-arrange" action that reorders photos to improve packing was considered and
+**rejected on measurement**. Best-of-all-permutations against as-ordered fill:
+
+| photos | as-ordered | best ordering |
+|---|---|---|
+| 5 | 57.9% | 64.5% |
+| 6 | 97.5% | 97.7% |
+| 7 | 96.9% | 97.7% |
+
+It buys about one point at six photos or more, and does not rescue the five-photo case. Fill
+is dominated by how many photos there are, not what order they sit in.
+
+Small counts pack badly and that is inherent: five photos of mixed aspect cannot fill a
+letter sheet under any ordering, while six reach 97%. The honest remedies are adding a photo,
+raising crop tolerance, or accepting the whitespace.
 
 ## Risks
 
