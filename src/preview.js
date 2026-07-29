@@ -17,6 +17,9 @@ export function renderPreview(container, photos, placements, page, scale = 1) {
     const box = document.createElement('div');
     box.className = 'absolute overflow-hidden bg-slate-200';
     box.dataset.photoId = pl.photoId;
+    box.draggable = true;
+    box.classList.add('cursor-move', 'ring-0', 'hover:ring-2', 'ring-sky-400');
+    if (byId.get(pl.photoId)?.pinned) box.classList.add('ring-2', 'ring-amber-400');
     box.style.left = `${pl.xIn * px}px`;
     box.style.top = `${pl.yIn * px}px`;
     box.style.width = `${pl.wIn * px}px`;

@@ -3,6 +3,7 @@ import { renderPreview } from './preview.js';
 import { attachIngest } from './photos.js';
 import { downloadPdf, printPdf } from './export-pdf.js';
 import { downloadPng } from './export-png.js';
+import { attachInteractions } from './interact.js';
 
 export const state = {
   photos: [],
@@ -46,6 +47,8 @@ bindSlider('crop', 'cropVal', (v) => v / 100, 'cropTolerance', (v) => Math.round
 bindSlider('gutter', 'gutVal', (v) => v / 100, 'gutterIn', (v) => v.toFixed(2));
 bindSlider('minsize', 'minVal', (v) => v / 10, 'minPhotoIn', (v) => v.toFixed(1));
 bindSlider('ratio', 'ratioVal', (v) => v / 10, 'ratioCap', (v) => v.toFixed(1));
+
+attachInteractions(sheet, state, rerender);
 
 attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected }) => {
   state.photos.push(...photos);
