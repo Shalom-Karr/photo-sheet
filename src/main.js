@@ -15,12 +15,15 @@ const sheet = document.getElementById('sheet');
 const warningsEl = document.getElementById('warnings');
 const countEl = document.getElementById('count');
 
+let previewScale = 1;
+
 export function rerender() {
   const { placements, warnings } = layout(state.photos, state.page);
 
   // Fit the sheet to the viewport without changing any inch-space value.
   const avail = sheet.parentElement.clientHeight - 48;
   const scale = Math.min(1, avail / (state.page.heightIn * 96));
+  previewScale = scale;
   renderPreview(sheet, state.photos, placements, state.page, scale);
 
   warningsEl.replaceChildren(
@@ -49,7 +52,7 @@ bindSlider('gutter', 'gutVal', (v) => v / 100, 'gutterIn', (v) => v.toFixed(2));
 bindSlider('minsize', 'minVal', (v) => v / 10, 'minPhotoIn', (v) => v.toFixed(1));
 bindSlider('ratio', 'ratioVal', (v) => v / 10, 'ratioCap', (v) => v.toFixed(1));
 
-attachInteractions(sheet, state, rerender);
+attachInteractions(sheet, state, rerender, () => previewScale);
 
 attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected }) => {
   state.photos.push(...photos);

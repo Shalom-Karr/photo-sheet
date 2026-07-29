@@ -37,6 +37,27 @@ export function renderPreview(container, photos, placements, page, scale = 1) {
     img.style.top = `${-pl.srcRect.y * (pl.hIn / pl.srcRect.h) * px}px`;
 
     box.appendChild(img);
+
+    // Five handles, all setting one anchor: width and height are locked
+    // together by aspect ratio, so an edge drag and a corner drag are the
+    // same constraint expressed on different axes.
+    const anchored = !!byId.get(pl.photoId)?.targetHeightIn;
+    for (const [edge, cls] of [
+      ['left',   'left-0 top-0 h-full w-1 cursor-ew-resize'],
+      ['right',  'right-0 top-0 h-full w-1 cursor-ew-resize'],
+      ['top',    'top-0 left-0 w-full h-1 cursor-ns-resize'],
+      ['bottom', 'bottom-0 left-0 w-full h-1 cursor-ns-resize'],
+      ['corner', 'bottom-0 right-0 w-3 h-3 cursor-nwse-resize'],
+    ]) {
+      const h = document.createElement('div');
+      h.dataset.resize = pl.photoId;
+      h.dataset.edge = edge;
+      h.className =
+        `absolute ${cls} transition-opacity ` +
+        (anchored ? 'bg-emerald-400 opacity-90' : 'bg-sky-400 opacity-0 hover:opacity-90');
+      box.appendChild(h);
+    }
+
     container.appendChild(box);
   }
 }
