@@ -43,6 +43,9 @@ export async function saveProject(state, name) {
       id: p.id,
       file: `${p.id}.bin`,
       mime: p.mime,
+      // Without this a reopened sheet loses EXIF orientation and the PDF
+      // exporter reintroduces the rotated-and-stretched bug.
+      orientation: p.orientation ?? 1,
       naturalW: p.naturalW,
       naturalH: p.naturalH,
       aspect: p.aspect,
@@ -84,7 +87,9 @@ export async function loadProject(name) {
   for (const meta of manifest.photos) {
     const file = await (await projDir.getFileHandle(meta.file)).getFile();
     const blob = new Blob([await file.arrayBuffer()], { type: meta.mime });
-    photos.push({ ...meta, blob, url: URL.createObjectURL(blob) });
+    // Default first so a manifest written before orientation existed loads as
+    // unrotated rather than undefined.
+    photos.push({ orientation: 1, ...meta, blob, url: URL.createObjectURL(blob) });
   }
   return { page: manifest.page, photos };
 }

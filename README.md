@@ -126,6 +126,11 @@ solving the layout in real inches.
 Cropped photos are embedded whole and clipped with a PDF clipping path, so the
 original JPEG bytes are preserved with no re-encode and no quality loss.
 
+The one exception is a photo carrying a non-default EXIF orientation. A PDF image
+XObject has no orientation concept, so such photos are re-encoded through a
+canvas — which the browser orients for us — rather than printed rotated. The
+orientation tag is read at ingest and saved with the sheet.
+
 ## Layout of the code
 
 | File | Responsibility |

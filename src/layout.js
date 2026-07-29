@@ -15,15 +15,6 @@ export function rowHeight(aspects, contentW, gutterIn) {
   return (contentW - (aspects.length - 1) * gutterIn) / sum;
 }
 
-export function totalHeight(aspects, rows, contentW, gutterIn) {
-  if (rows.length === 0) return 0;
-  const sum = rows.reduce(
-    (s, [a, b]) => s + rowHeight(aspects.slice(a, b), contentW, gutterIn),
-    0,
-  );
-  return sum + (rows.length - 1) * gutterIn;
-}
-
 // Maximise page fill using only rows whose height falls inside a window
 // [lo, lo*ratioCap], sweeping the window across the plausible range.
 //
@@ -42,7 +33,12 @@ export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
   // above by the tallest single photo spanning the full width.
   const allInOne = rowHeight(aspects, contentW, gutterIn);
   const tallestSingle = Math.max(...aspects.map((a) => contentW / a));
-  const loMin = Math.max(1e-6, Math.min(allInOne, tallestSingle));
+  // contentH belongs in the lower bound because heightOf clamps to it. Two very
+  // tall photos make even the all-in-one row taller than the page, so every
+  // candidate clamps to contentH — below the window — and no window admits any
+  // layout at all. The fallback then gives each photo a full-height row and the
+  // sheet silently overflows.
+  const loMin = Math.max(1e-6, Math.min(allInOne, tallestSingle, contentH));
   const loMax = Math.max(allInOne, tallestSingle, loMin);
 
   // A single photo can be taller than the whole page (a 2:3 portrait spanning
@@ -119,16 +115,22 @@ export function absorbResidual(heights, gutterIn, contentH, cropTolerance) {
   const used = sumH + (n - 1) * gutterIn;
   const residual = contentH - used;
 
-  if (residual <= 1e-9 || cropTolerance <= 0) {
+  if (residual <= 1e-9) {
     return { heights: heights.slice(), cropFraction: 0, extraGutter: 0 };
   }
 
-  // crop = residual / (sumH + residual); invert for the tolerance-capped case.
-  let cropFraction = residual / (sumH + residual);
-  let absorbed = residual;
-  if (cropFraction > cropTolerance) {
-    cropFraction = cropTolerance;
-    absorbed = (sumH * cropTolerance) / (1 - cropTolerance);
+  // Zero tolerance absorbs nothing, but the residual is not discarded: it falls
+  // through and becomes extraGutter below, as it does whenever the cap binds.
+  let cropFraction = 0;
+  let absorbed = 0;
+  if (cropTolerance > 0) {
+    // crop = residual / (sumH + residual); invert for the tolerance-capped case.
+    cropFraction = residual / (sumH + residual);
+    absorbed = residual;
+    if (cropFraction > cropTolerance) {
+      cropFraction = cropTolerance;
+      absorbed = (sumH * cropTolerance) / (1 - cropTolerance);
+    }
   }
 
   const scale = (sumH + absorbed) / sumH;

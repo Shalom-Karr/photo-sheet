@@ -9,9 +9,17 @@ const PT = 72;
 // Non-JPEG/PNG formats (WebP, etc.) are re-encoded to PNG via canvas because
 // pdf-lib only supports JPEG and PNG as image formats.
 async function embedPhoto(doc, photo) {
-  const bytes = new Uint8Array(await photo.blob.arrayBuffer());
-  if (photo.mime === 'image/png') return doc.embedPng(bytes);
-  if (photo.mime === 'image/jpeg') return doc.embedJpg(bytes);
+  // A PDF image XObject has no orientation concept and pdf-lib's embedders
+  // never look at EXIF, so a rotated photo embedded raw prints rotated — and
+  // stretched, because the crop math divides by srcRect using the corrected
+  // aspect against the uncorrected pixel grid. The canvas path below already
+  // gets this right: Chrome applies EXIF when loading the <img> and again when
+  // drawing it. Orientation 1 keeps the fast path and its original bytes.
+  if ((photo.orientation ?? 1) === 1) {
+    const bytes = new Uint8Array(await photo.blob.arrayBuffer());
+    if (photo.mime === 'image/png') return doc.embedPng(bytes);
+    if (photo.mime === 'image/jpeg') return doc.embedJpg(bytes);
+  }
   // Fallback: re-encode through canvas. Quality loss is unavoidable, but
   // correctness (all photos appear) matters more than lossless embedding.
   const canvas = Object.assign(document.createElement('canvas'), {

@@ -115,10 +115,13 @@ document.getElementById('load').addEventListener('click', async () => {
   if (!projList.value) return;
   try {
     const loaded = await loadProject(projList.value);
+    // syncSliders can throw on a malformed manifest, so it runs before the
+    // commit. Revoking the old URLs first left the preview showing photos whose
+    // blobs had just been freed — broken images on top of the error.
+    syncSliders(loaded.page);
     state.photos.forEach((p) => URL.revokeObjectURL(p.url));
     state.photos = loaded.photos;
     state.page = loaded.page;
-    syncSliders(state.page);
     rerender();
   } catch (e) {
     alert(`Load failed: ${e.message}`);

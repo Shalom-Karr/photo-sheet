@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rowHeight, LETTER, totalHeight } from '../src/layout.js';
+import { rowHeight, LETTER } from '../src/layout.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 
@@ -28,14 +28,6 @@ test('LETTER defaults match the spec', () => {
   assert.equal(LETTER.cropTolerance, 0.06);
   assert.equal(LETTER.minPhotoIn, 1.5);
   assert.equal(LETTER.ratioCap, 3);
-});
-
-test('totalHeight sums rows plus the gutters between them', () => {
-  const aspects = [1.5, 1.5, 1.5, 1.5];
-  const rows = [[0, 2], [2, 4]];
-  // Each row: two 1.5-aspect photos across 8in with one 0.08 gutter.
-  // h = (8 - 0.08) / 3 = 2.64. Two rows plus one gutter between them.
-  assert.ok(Math.abs(totalHeight(aspects, rows, 8, 0.08) - (2.64 * 2 + 0.08)) < 1e-9);
 });
 
 import { solveRows } from '../src/layout.js';
@@ -118,6 +110,16 @@ test('zero tolerance leaves heights untouched and crops nothing', () => {
   const r = absorbResidual([3, 3, 3], 0.08, 10.5, 0);
   assert.equal(r.cropFraction, 0);
   assert.deepEqual(r.heights, [3, 3, 3]);
+});
+
+test('zero tolerance turns the residual into gutter rather than discarding it', () => {
+  // The short-circuit used to return extraGutter 0 here, silently losing 1.34in
+  // of page. Whatever the cap cannot absorb is spread across every gap.
+  const residual = 10.5 - (9 + 2 * 0.08);
+  const r = absorbResidual([3, 3, 3], 0.08, 10.5, 0);
+  assert.ok(Math.abs(r.extraGutter - residual / 4) < 1e-9, `extraGutter ${r.extraGutter}`);
+  const used = r.heights.reduce((a, b) => a + b, 0) + 2 * 0.08 + 4 * r.extraGutter;
+  assert.ok(Math.abs(used - 10.5) < 1e-9, `used ${used}, expected 10.5`);
 });
 
 test('residual is absorbed and grown heights fill the page', () => {
@@ -226,6 +228,22 @@ test('empty input is not an error', () => {
   const { placements, warnings } = layout([], LETTER);
   assert.deepEqual(placements, []);
   assert.deepEqual(warnings, []);
+});
+
+test('very tall photos are clamped to the page instead of overflowing it', () => {
+  // Two 0.35-aspect photos reached 21.330in on an 11in page, three 0.22s
+  // reached 31.910in, both with no warning. The all-in-one row was taller than
+  // the page, so every candidate clamped to contentH — below the row-height
+  // window's lower bound — and no window admitted anything. The fallback then
+  // gave each photo a full-height row of its own.
+  for (const aspects of [[0.35, 0.35], [0.22, 0.22, 0.22]]) {
+    const { placements } = layout(mk(aspects), LETTER);
+    const bottom = Math.max(...placements.map((p) => p.yIn + p.hIn));
+    assert.ok(
+      bottom <= LETTER.heightIn - LETTER.marginIn + 1e-6,
+      `bottom ${bottom} for ${aspects.length} photos of aspect ${aspects[0]}`,
+    );
+  }
 });
 
 test('a clamped row is centred rather than left-aligned', () => {
