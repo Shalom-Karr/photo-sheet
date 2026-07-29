@@ -27,6 +27,7 @@ test('LETTER defaults match the spec', () => {
   assert.equal(LETTER.gutterIn, 0.08);
   assert.equal(LETTER.cropTolerance, 0.06);
   assert.equal(LETTER.minPhotoIn, 1.5);
+  assert.equal(LETTER.ratioCap, 3);
 });
 
 test('totalHeight sums rows plus the gutters between them', () => {
@@ -149,4 +150,92 @@ test('no residual means no crop and no extra gutter', () => {
   const r = absorbResidual([3, 3, 3], 0.08, used, 0.06);
   assert.ok(Math.abs(r.cropFraction) < 1e-9);
   assert.ok(Math.abs(r.extraGutter) < 1e-9);
+});
+
+import { layout } from '../src/layout.js';
+
+const mk = (aspects) => aspects.map((a, i) => ({ id: `p${i}`, aspect: a }));
+
+test('placements stay inside the printable area', () => {
+  const { placements } = layout(mk([1.5, 1.78, 1, 0.67, 1.33, 1.5]), LETTER);
+  for (const p of placements) {
+    assert.ok(p.xIn >= LETTER.marginIn - 1e-6);
+    assert.ok(p.yIn >= LETTER.marginIn - 1e-6);
+    assert.ok(p.xIn + p.wIn <= LETTER.widthIn - LETTER.marginIn + 1e-6);
+    assert.ok(p.yIn + p.hIn <= LETTER.heightIn - LETTER.marginIn + 1e-6);
+  }
+});
+
+test('every photo is placed exactly once', () => {
+  const photos = mk([1.5, 1.78, 1, 0.67, 1.33, 1.5, 1]);
+  const { placements } = layout(photos, LETTER);
+  assert.equal(placements.length, photos.length);
+  assert.equal(new Set(placements.map(p => p.photoId)).size, photos.length);
+});
+
+test('zero crop tolerance preserves aspect ratios exactly', () => {
+  const photos = mk([1.5, 1.78, 1, 0.67]);
+  const { placements } = layout(photos, { ...LETTER, cropTolerance: 0 });
+  placements.forEach((p, i) => {
+    assert.ok(Math.abs(p.wIn / p.hIn - photos[i].aspect) < 1e-6);
+    assert.equal(p.srcRect.w, 1);
+  });
+});
+
+test('cropping trims width only, never height', () => {
+  const photos = mk([1.5, 1.78, 1, 0.67, 1.33]);
+  const { placements } = layout(photos, { ...LETTER, cropTolerance: 0.5 });
+  for (const p of placements) {
+    assert.equal(p.srcRect.h, 1, 'height must never be trimmed');
+    assert.equal(p.srcRect.y, 0);
+    assert.ok(p.srcRect.w <= 1 && p.srcRect.w > 0);
+  }
+});
+
+test('cropOffset shifts the window but keeps it inside the source', () => {
+  const photos = mk([1.5, 1.78, 1, 0.67, 1.33]).map(p => ({ ...p, cropOffset: 1 }));
+  const { placements } = layout(photos, { ...LETTER, cropTolerance: 0.5 });
+  for (const p of placements) {
+    assert.ok(p.srcRect.x >= -1e-9);
+    assert.ok(p.srcRect.x + p.srcRect.w <= 1 + 1e-9);
+  }
+});
+
+test('a pinned photo gets a row to itself', () => {
+  const photos = mk([1.5, 1.78, 1, 1.33]);
+  photos[1].pinned = true;
+  const { placements } = layout(photos, LETTER);
+  const pin = placements.find(p => p.photoId === 'p1');
+  const sameRow = placements.filter(p => Math.abs(p.yIn - pin.yIn) < 1e-6);
+  assert.equal(sameRow.length, 1);
+  assert.ok(Math.abs(pin.wIn - (LETTER.widthIn - 2 * LETTER.marginIn)) < 1e-6);
+});
+
+test('too many photos raises a density warning', () => {
+  const many = mk(Array.from({ length: 60 }, () => 1.5));
+  const { warnings } = layout(many, LETTER);
+  assert.ok(warnings.some(w => w.code === 'density'));
+});
+
+test('a comfortable sheet raises no warnings', () => {
+  const { warnings } = layout(mk([1.5, 1.78, 1, 1.33, 1.5, 1]), LETTER);
+  assert.equal(warnings.length, 0);
+});
+
+test('empty input is not an error', () => {
+  const { placements, warnings } = layout([], LETTER);
+  assert.deepEqual(placements, []);
+  assert.deepEqual(warnings, []);
+});
+
+test('a clamped row is centred rather than left-aligned', () => {
+  // 8 / 0.667 = 12in wide at full height; clamped to the 10.5in page it
+  // becomes 7.0in wide, leaving 0.5in of slack to split evenly.
+  const { placements } = layout([{ id: 'a', aspect: 0.667 }], LETTER);
+  assert.equal(placements.length, 1);
+  const p = placements[0];
+  const leftGap = p.xIn - LETTER.marginIn;
+  const rightGap = (LETTER.widthIn - LETTER.marginIn) - (p.xIn + p.wIn);
+  assert.ok(Math.abs(leftGap - rightGap) < 1e-6, `left ${leftGap} right ${rightGap}`);
+  assert.ok(leftGap > 0, 'a clamped row should have slack on both sides');
 });

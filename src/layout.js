@@ -5,6 +5,7 @@ export const LETTER = {
   gutterIn: 0.08,
   cropTolerance: 0.06,
   minPhotoIn: 1.5,
+  ratioCap: 3,
 };
 
 // Photos in a row share height h. Their widths plus gutters must equal contentW:
@@ -136,4 +137,69 @@ export function absorbResidual(heights, gutterIn, contentH, cropTolerance) {
   const extraGutter = (residual - absorbed) / (n + 1);
 
   return { heights: heights.map((h) => h * scale), cropFraction, extraGutter };
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+export function layout(photos, page) {
+  if (photos.length === 0) return { placements: [], warnings: [] };
+
+  const contentW = page.widthIn - 2 * page.marginIn;
+  const contentH = page.heightIn - 2 * page.marginIn;
+  const aspects = photos.map((p) => p.aspect);
+  const pinned = photos.map((p) => !!p.pinned);
+
+  const { rows, heights } = solveRows(aspects, contentW, contentH, page.gutterIn, {
+    pinned,
+    ratioCap: page.ratioCap,
+  });
+  const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
+
+  // Visible slice of each source after the uniform horizontal trim.
+  const visW = 1 - abs.cropFraction;
+
+  const placements = [];
+  let y = page.marginIn + abs.extraGutter;
+
+  rows.forEach(([start, end], r) => {
+    const rowH = abs.heights[r];
+    // Width is fixed by the pre-absorption height, so growing the row crops.
+    const baseH = heights[r];
+    // True row width from the pre-absorption height. For a flush row this equals
+    // contentW exactly, so the centring offset is zero — no branch needed.
+    const rowW = aspects.slice(start, end).reduce((s, a) => s + a * baseH, 0)
+               + (end - start - 1) * page.gutterIn;
+    let x = page.marginIn + (contentW - rowW) / 2;
+
+    for (let i = start; i < end; i++) {
+      const wIn = aspects[i] * baseH;
+      const offset = clamp(photos[i].cropOffset ?? 0, -1, 1);
+      const slack = 1 - visW;
+      const sx = clamp(slack / 2 + (offset * slack) / 2, 0, slack);
+
+      placements.push({
+        photoId: photos[i].id,
+        xIn: x,
+        yIn: y,
+        wIn,
+        hIn: rowH,
+        srcRect: { x: sx, y: 0, w: visW, h: 1 },
+      });
+      x += wIn + page.gutterIn;
+    }
+    y += rowH + page.gutterIn + abs.extraGutter;
+  });
+
+  const warnings = [];
+  const smallest = Math.min(...placements.map((p) => Math.min(p.wIn, p.hIn)));
+  if (smallest < page.minPhotoIn) {
+    warnings.push({
+      code: 'density',
+      message:
+        `Smallest photo is ${smallest.toFixed(2)} in, below the ` +
+        `${page.minPhotoIn} in minimum. Remove photos or lower the minimum.`,
+    });
+  }
+
+  return { placements, warnings };
 }
