@@ -1,5 +1,6 @@
 import { layout, LETTER } from './layout.js';
 import { renderPreview } from './preview.js';
+import { attachIngest } from './photos.js';
 
 export const state = {
   photos: [],
@@ -43,5 +44,11 @@ bindSlider('crop', 'cropVal', (v) => v / 100, 'cropTolerance', (v) => Math.round
 bindSlider('gutter', 'gutVal', (v) => v / 100, 'gutterIn', (v) => v.toFixed(2));
 bindSlider('minsize', 'minVal', (v) => v / 10, 'minPhotoIn', (v) => v.toFixed(1));
 bindSlider('ratio', 'ratioVal', (v) => v / 10, 'ratioCap', (v) => v.toFixed(1));
+
+attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected }) => {
+  state.photos.push(...photos);
+  rerender();
+  if (rejected.length) alert(rejected.join('\n'));
+});
 
 rerender();
