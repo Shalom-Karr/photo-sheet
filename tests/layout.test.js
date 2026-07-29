@@ -110,3 +110,43 @@ test('a pinned photo takes a row alone even when that breaks the window', () => 
 test('empty input yields no rows', () => {
   assert.deepEqual(solveRows([], CW, CH, 0.08).rows, []);
 });
+
+import { absorbResidual } from '../src/layout.js';
+
+test('zero tolerance leaves heights untouched and crops nothing', () => {
+  const r = absorbResidual([3, 3, 3], 0.08, 10.5, 0);
+  assert.equal(r.cropFraction, 0);
+  assert.deepEqual(r.heights, [3, 3, 3]);
+});
+
+test('residual is absorbed and grown heights fill the page', () => {
+  const heights = [3, 3, 3];
+  const r = absorbResidual(heights, 0.08, 9.4, 0.5);
+  const used = r.heights.reduce((a, b) => a + b, 0) + 2 * 0.08;
+  assert.ok(Math.abs(used - 9.4) < 1e-6, `used ${used}, expected 9.4`);
+});
+
+test('crop fraction is identical across rows by construction', () => {
+  // Uniform crop is the point: crop that varies photo to photo reads as broken.
+  const heights = [2, 4, 3];
+  const r = absorbResidual(heights, 0.08, 10.5, 0.5);
+  const scale = r.heights[0] / heights[0];
+  for (let i = 1; i < heights.length; i++) {
+    assert.ok(Math.abs(r.heights[i] / heights[i] - scale) < 1e-9);
+  }
+  assert.ok(Math.abs(1 - 1 / scale - r.cropFraction) < 1e-9);
+});
+
+test('crop never exceeds tolerance; the remainder becomes gutter', () => {
+  const heights = [2, 2, 2];
+  const r = absorbResidual(heights, 0.08, 10.5, 0.06);
+  assert.ok(r.cropFraction <= 0.06 + 1e-9, `crop ${r.cropFraction}`);
+  assert.ok(r.extraGutter > 0, 'leftover should widen the gutters');
+});
+
+test('no residual means no crop and no extra gutter', () => {
+  const used = 3 + 3 + 3 + 2 * 0.08;
+  const r = absorbResidual([3, 3, 3], 0.08, used, 0.06);
+  assert.ok(Math.abs(r.cropFraction) < 1e-9);
+  assert.ok(Math.abs(r.extraGutter) < 1e-9);
+});

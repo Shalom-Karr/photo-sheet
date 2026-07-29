@@ -106,3 +106,34 @@ export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
   const rows = aspects.map((_, i) => [i, i + 1]);
   return { rows, heights: rows.map(([a, b]) => heightOf(a, b)) };
 }
+
+// Growing a row from h to h*scale keeps its width fixed, so each photo's source
+// is trimmed left and right by 1 − 1/scale. Distributing the residual in
+// proportion to row height makes that fraction identical on every row.
+export function absorbResidual(heights, gutterIn, contentH, cropTolerance) {
+  const n = heights.length;
+  if (n === 0) return { heights: [], cropFraction: 0, extraGutter: 0 };
+
+  const sumH = heights.reduce((a, b) => a + b, 0);
+  const used = sumH + (n - 1) * gutterIn;
+  const residual = contentH - used;
+
+  if (residual <= 1e-9 || cropTolerance <= 0) {
+    return { heights: heights.slice(), cropFraction: 0, extraGutter: 0 };
+  }
+
+  // crop = residual / (sumH + residual); invert for the tolerance-capped case.
+  let cropFraction = residual / (sumH + residual);
+  let absorbed = residual;
+  if (cropFraction > cropTolerance) {
+    cropFraction = cropTolerance;
+    absorbed = (sumH * cropTolerance) / (1 - cropTolerance);
+  }
+
+  const scale = (sumH + absorbed) / sumH;
+  // Whitespace the crop cap could not absorb is spread across every gap —
+  // above, between and below — so it reads as margin rather than a bottom band.
+  const extraGutter = (residual - absorbed) / (n + 1);
+
+  return { heights: heights.map((h) => h * scale), cropFraction, extraGutter };
+}
