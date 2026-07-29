@@ -4,9 +4,8 @@ Packs photos of mixed aspect ratios (1:1, 5:4, 4:3, 3:2, 16:9, and portrait
 variants) onto one printable sheet with minimal blank space, re-solving the
 whole page automatically as photos are added or removed.
 
-> **Status: in development.** The layout engine is being built and tested first;
-> the browser app is not usable yet. This README describes what currently exists
-> and is updated as tasks land. See the roadmap below.
+> **Status: usable, still in development.** You can load photos and see them laid
+> out. Export and printing are not wired up yet. See the roadmap below.
 
 ## Documents
 
@@ -19,13 +18,12 @@ whole page automatically as photos are added or removed.
 
 1. **Row height is solved, not searched.** Photos in a row share a height, and
    spanning the content width exactly determines it — one linear equation.
-2. **Break points come from a dynamic program** minimising squared deviation
-   from a target height. Greedy row filling strands one photo alone on the last
-   row at several times everyone else's size; costing every possible split
-   cannot.
-3. **Target height is binary-searched** so the sheet fills vertically. Web
-   galleries treat target height as a constant because they scroll forever. A
-   sheet has a hard bottom edge, which turns it into a solved variable.
+2. **Break points come from a dynamic program**, considering every possible split
+   rather than filling greedily until a row overflows.
+3. **Fill is maximised inside a row-height window.** Rows may differ in height by
+   up to a user-set cap (default 3x). Forcing rows to near-equal heights looks
+   tidier but caps page fill at 40-76%; allowing 3x reaches 85-96%. "Minimal
+   blank space" and "neat and aligned" genuinely conflict, and that cap is the dial.
 4. **Leftover height becomes a uniform crop.** Distributing the residual in
    proportion to row height makes the crop fraction algebraically identical on
    every row — a consistent trim reads as intentional, whereas crop that varies
@@ -51,12 +49,11 @@ path argument is resolved as a module and fails with `MODULE_NOT_FOUND`.
 ## Roadmap
 
 - [x] Flush row-height solving
-- [x] Row breaking by dynamic programming
-- [ ] Binary-searched target height
-- [ ] Residual absorption and uniform crop
-- [ ] `layout()` entry point emitting inch-space placements
-- [ ] App shell and live preview
-- [ ] Photo ingest — file picker, clipboard paste, drag and drop
+- [x] Fill maximisation within a row-height window
+- [x] Residual absorption and uniform crop
+- [x] `layout()` entry point emitting inch-space placements
+- [x] App shell and live preview
+- [x] Photo ingest — file picker, clipboard paste, drag and drop
 - [ ] PDF export and printing
 - [ ] PNG export at 300 DPI
 - [ ] Drag to reorder, pin, crop nudge
@@ -76,3 +73,17 @@ path argument is resolved as a module and fails with `MODULE_NOT_FOUND`.
 ## Licence
 
 Not yet determined.
+
+## Page fill by photo count
+
+Fill is dominated by how many photos are on the sheet, not what order they are in:
+
+| photos | page fill |
+|---|---|
+| 5 | 73% |
+| 8 | 89% |
+| 12 | 96% |
+
+Five photos of mixed aspect ratio cannot fill a letter sheet under **any** ordering —
+the best of all 120 permutations reaches 64.5% ink coverage against 57.9% as-ordered.
+Six photos reach 97%. Reordering was measured and rejected as a feature on that basis.
