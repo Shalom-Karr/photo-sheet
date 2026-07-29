@@ -143,6 +143,36 @@ export function absorbResidual(heights, gutterIn, contentH, cropTolerance) {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// Last resort, used by both layout paths. solveRows fits its rows inside the
+// height it is given only when it finds a layout at all; its fallback — one row
+// per photo — does not, and pinning reaches that fallback on ordinary sheets.
+//
+// Contiguity plus a solo pinned row strands the photo immediately before the pin
+// alone in a row of its own, because the only contiguous range it can occupy ends
+// at the pin. Both rows are then full width. For [1.5, 1.78, …] with the second
+// photo pinned that is 5.33in plus 4.49in before the remaining four photos get
+// anything — genuinely infeasible, so no window admits a layout. Measured, 31 of
+// 46 single-pin cases overflowed, the worst reaching 72.89in on a 10.75in page.
+//
+// Gutters are fixed, so only the heights can give. scaled tells the caller to say
+// out loud that the sheet did not fit.
+function fitToPage(heights, gutterIn, contentH) {
+  const gutters = (heights.length - 1) * gutterIn;
+  const sumH = heights.reduce((a, b) => a + b, 0);
+  if (sumH + gutters <= contentH || !(sumH > 0)) {
+    return { heights: heights.slice(), scaled: false };
+  }
+  const scale = Math.max(0, contentH - gutters) / sumH;
+  return { heights: heights.map((h) => h * scale), scaled: true };
+}
+
+const OVERFLOW_WARNING = {
+  code: 'overflow',
+  message:
+    'This combination does not fit the sheet, so every photo was scaled down ' +
+    'to fit. Unpinning a photo usually recovers the space.',
+};
+
 export function layout(photos, page) {
   if (photos.length === 0) return { placements: [], warnings: [] };
 
@@ -163,10 +193,14 @@ export function layout(photos, page) {
   const aspects = photos.map((p) => p.aspect);
   const pinned = photos.map((p) => !!p.pinned);
 
-  const { rows, heights } = solveRows(aspects, contentW, contentH, page.gutterIn, {
+  const { rows, heights: solvedH } = solveRows(aspects, contentW, contentH, page.gutterIn, {
     pinned,
     ratioCap: page.ratioCap,
   });
+  // A no-op unless the page would actually overflow, which needs an infeasible
+  // sheet — in practice a pinned photo that is not the first.
+  const fit = fitToPage(solvedH, page.gutterIn, contentH);
+  const heights = fit.heights;
   const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
 
   // Visible slice of each source after the uniform horizontal trim.
@@ -204,7 +238,16 @@ export function layout(photos, page) {
     y += rowH + page.gutterIn + abs.extraGutter;
   });
 
-  return { placements, warnings: densityWarnings(placements, page) };
+  return { placements, warnings: warningsFor(placements, page, fit.scaled) };
+}
+
+// The overflow explanation comes first: it is the reason the photos are small, so
+// it reads before the density warning that scaling down usually also triggers.
+function warningsFor(placements, page, scaled) {
+  const warnings = [];
+  if (scaled) warnings.push({ ...OVERFLOW_WARNING });
+  warnings.push(...densityWarnings(placements, page));
+  return warnings;
 }
 
 function densityWarnings(placements, page) {
@@ -360,22 +403,18 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
   }
   if (anchorPos >= nRows) rowsOut.push({ anchored: true });
 
-  const heights = rowsOut.map((r) => (r.anchored ? target : r.h));
-
-  // Backstop. solveRows fits its rows inside the height it is given only when it
-  // finds a layout at all; its fallback — one row per photo — does not. A pinned
-  // photo makes that reachable on an ordinary sheet: a pin forbids grouping, so
-  // three leftover photos need three rows where one flush row would have done,
-  // and three full-width rows do not fit a strip. Shrink every row to fit instead
-  // of running off the page. The anchored row gives up its exact height only here,
-  // where the sheet cannot honour it at all.
-  const gutters = (heights.length - 1) * page.gutterIn;
-  const sumH = heights.reduce((a, b) => a + b, 0);
-  if (sumH + gutters > contentH && sumH > 0) {
-    const shrink = Math.max(0, contentH - gutters) / sumH;
-    for (let i = 0; i < heights.length; i++) heights[i] *= shrink;
-  }
-
+  // Excluding pinned photos from the row puts every pin in the rest, and a pin
+  // forbids grouping, so three leftover photos need three full-width rows where
+  // one flush row would have done — more height than the strip beside an anchored
+  // row holds. That reaches the same solveRows fallback, so the same backstop
+  // applies. The anchored row gives up its exact height only here, where the sheet
+  // cannot honour it at all.
+  const fit = fitToPage(
+    rowsOut.map((r) => (r.anchored ? target : r.h)),
+    page.gutterIn,
+    contentH,
+  );
+  const heights = fit.heights;
   const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
   // The anchored row keeps the height it asked for; only ordinary rows absorb.
   const finalH = rowsOut.map((r, i) => (r.anchored ? heights[i] : abs.heights[i]));
@@ -412,5 +451,5 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     y += boxH + page.gutterIn + abs.extraGutter;
   });
 
-  return { placements, warnings: densityWarnings(placements, page) };
+  return { placements, warnings: warningsFor(placements, page, fit.scaled) };
 }

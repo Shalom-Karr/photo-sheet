@@ -204,13 +204,35 @@ test('cropOffset shifts the window but keeps it inside the source', () => {
 });
 
 test('a pinned photo gets a row to itself', () => {
+  // Pinned on the first photo the sheet stays feasible, so the pinned row is
+  // flush to the content width. This used to pin photo 1 instead, which is not
+  // feasible on these aspects — see the next test.
   const photos = mk([1.5, 1.78, 1, 1.33]);
-  photos[1].pinned = true;
-  const { placements } = layout(photos, LETTER);
-  const pin = placements.find(p => p.photoId === 'p1');
+  photos[0].pinned = true;
+  const { placements, warnings } = layout(photos, LETTER);
+  const pin = placements.find(p => p.photoId === 'p0');
   const sameRow = placements.filter(p => Math.abs(p.yIn - pin.yIn) < 1e-6);
   assert.equal(sameRow.length, 1);
   assert.ok(Math.abs(pin.wIn - (LETTER.widthIn - 2 * LETTER.marginIn)) < 1e-6);
+  assert.equal(warnings.length, 0);
+});
+
+test('a pin that cannot fit is scaled down rather than run off the page', () => {
+  // These are the aspects and the pin this file used to assert a full-width
+  // pinned row on. It is infeasible: pinning photo 1 strands photo 0 alone too,
+  // because the only contiguous range it can occupy ends at the pin, and
+  // 5.33 + 4.49 + 3.40in of rows cannot fit a 10.5in page. The old assertion
+  // held only because every photo was getting a full-width row on a sheet that
+  // ran 26in down an 11in page. A flush pinned row is not available here; saying
+  // so and scaling to fit is the correct outcome.
+  const photos = mk([1.5, 1.78, 1, 1.33]);
+  photos[1].pinned = true;
+  const { placements, warnings } = layout(photos, LETTER);
+  const pin = placements.find(p => p.photoId === 'p1');
+  assert.equal(placements.filter(p => Math.abs(p.yIn - pin.yIn) < 1e-6).length, 1);
+  assert.ok(warnings.some(w => w.code === 'overflow'), 'expected an overflow warning');
+  const bottom = Math.max(...placements.map(p => p.yIn + p.hIn));
+  assert.ok(bottom <= LETTER.heightIn - LETTER.marginIn + 1e-6, `bottom ${bottom}`);
 });
 
 test('too many photos raises a density warning', () => {
@@ -256,6 +278,32 @@ test('a clamped row is centred rather than left-aligned', () => {
   const rightGap = (LETTER.widthIn - LETTER.marginIn) - (p.xIn + p.wIn);
   assert.ok(Math.abs(leftGap - rightGap) < 1e-6, `left ${leftGap} right ${rightGap}`);
   assert.ok(leftGap > 0, 'a clamped row should have slack on both sides');
+});
+
+test('pinning never pushes the sheet off the page', () => {
+  const pools = [
+    [1.5, 1.78, 1, 0.67, 1.33, 1.5],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1.5, 1.78, 1],
+    [0.67, 0.75, 1, 1.33],
+  ];
+  for (const aspects of pools) {
+    for (let pi = 0; pi < aspects.length; pi++) {
+      const photos = aspects.map((a, i) => ({ id: `p${i}`, aspect: a, pinned: i === pi }));
+      const { placements } = layout(photos, LETTER);
+      const bottom = Math.max(...placements.map((p) => p.yIn + p.hIn));
+      assert.ok(
+        bottom <= LETTER.heightIn - LETTER.marginIn + 1e-6,
+        `aspects [${aspects}] pin ${pi} reached ${bottom.toFixed(2)}in`,
+      );
+    }
+  }
+});
+
+test('a sheet that cannot fit says so', () => {
+  const photos = [1, 1, 1, 1, 1, 1, 1, 1, 1].map((a, i) => ({ id: `p${i}`, aspect: a, pinned: i === 1 }));
+  const { warnings } = layout(photos, LETTER);
+  assert.ok(warnings.some((w) => w.code === 'overflow'), 'expected an overflow warning');
 });
 
 import { clampTarget, anchoredRow } from '../src/layout.js';
