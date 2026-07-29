@@ -1,6 +1,7 @@
 import { layout, LETTER } from './layout.js';
 import { renderPreview } from './preview.js';
 import { attachIngest } from './photos.js';
+import { downloadPdf, printPdf } from './export-pdf.js';
 
 export const state = {
   photos: [],
@@ -49,6 +50,16 @@ attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected
   state.photos.push(...photos);
   rerender();
   if (rejected.length) alert(rejected.join('\n'));
+});
+
+document.getElementById('pdf').addEventListener('click', async () => {
+  const { placements } = layout(state.photos, state.page);
+  await downloadPdf(state.photos, placements, state.page);
+});
+
+document.getElementById('print').addEventListener('click', async () => {
+  const { placements } = layout(state.photos, state.page);
+  await printPdf(state.photos, placements, state.page);
 });
 
 rerender();
