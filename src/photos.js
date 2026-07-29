@@ -94,6 +94,7 @@ export async function ingestFiles(files) {
         aspect: bitmap.width / bitmap.height,
         cropOffset: 0,
         pinned: false,
+        targetHeightIn: null,
       });
       bitmap.close();
     } catch (e) {

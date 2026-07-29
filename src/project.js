@@ -51,6 +51,7 @@ export async function saveProject(state, name) {
       aspect: p.aspect,
       cropOffset: p.cropOffset,
       pinned: p.pinned,
+      targetHeightIn: p.targetHeightIn ?? null,
     })),
   };
 
@@ -89,7 +90,7 @@ export async function loadProject(name) {
     const blob = new Blob([await file.arrayBuffer()], { type: meta.mime });
     // Default first so a manifest written before orientation existed loads as
     // unrotated rather than undefined.
-    photos.push({ orientation: 1, ...meta, blob, url: URL.createObjectURL(blob) });
+    photos.push({ orientation: 1, targetHeightIn: null, ...meta, blob, url: URL.createObjectURL(blob) });
   }
   return { page: manifest.page, photos };
 }
