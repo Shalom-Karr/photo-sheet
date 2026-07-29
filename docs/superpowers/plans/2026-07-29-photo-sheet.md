@@ -17,7 +17,7 @@
 - Page defaults: 8.5 × 11 in, margin 0.25 in, gutter 0.08 in, crop tolerance 0.06, minimum photo dimension 1.5 in.
 - Crop is **horizontal only** — rows are width-constrained, so absorbing residual height always trims left/right edges.
 - Single sheet only. Overflow raises a density warning; it never flows to page 2.
-- Tests run with `node --test tests/`. Requires `"type": "module"` in `package.json`.
+- Tests run with `node --test` — **no path argument**. On Node 22 for Windows, `node --test tests/` resolves the path as a module and fails with `MODULE_NOT_FOUND`; bare `node --test` auto-discovers `tests/*.test.js` correctly. Requires `"type": "module"` in `package.json`.
 
 ---
 
@@ -42,7 +42,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test"
   }
 }
 ```
