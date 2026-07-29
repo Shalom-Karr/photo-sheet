@@ -148,6 +148,18 @@ export function layout(photos, page) {
 
   const contentW = page.widthIn - 2 * page.marginIn;
   const contentH = page.heightIn - 2 * page.marginIn;
+
+  // At most one anchor is honoured; the first wins. The guard must reject null,
+  // undefined, 0 and NaN, or an unanchored sheet would take the anchored path
+  // and stop matching the ordinary engine.
+  const anchorIdx = photos.findIndex(
+    (p) => typeof p.targetHeightIn === 'number' && p.targetHeightIn > 0,
+  );
+
+  if (anchorIdx >= 0) {
+    return layoutAnchored(photos, page, contentW, contentH, anchorIdx);
+  }
+
   const aspects = photos.map((p) => p.aspect);
   const pinned = photos.map((p) => !!p.pinned);
 
@@ -192,16 +204,182 @@ export function layout(photos, page) {
     y += rowH + page.gutterIn + abs.extraGutter;
   });
 
-  const warnings = [];
+  return { placements, warnings: densityWarnings(placements, page) };
+}
+
+function densityWarnings(placements, page) {
   const smallest = Math.min(...placements.map((p) => Math.min(p.wIn, p.hIn)));
-  if (smallest < page.minPhotoIn) {
-    warnings.push({
+  if (smallest >= page.minPhotoIn) return [];
+  return [
+    {
       code: 'density',
       message:
         `Smallest photo is ${smallest.toFixed(2)} in, below the ` +
         `${page.minPhotoIn} in minimum. Remove photos or lower the minimum.`,
-    });
+    },
+  ];
+}
+
+// A photo's size is its row's height, and a row cannot be wider than the page.
+// So a target is bounded above by both the width limit and the page height.
+export function clampTarget(target, aspect, contentW, contentH, minPhotoIn) {
+  const widthLimit = contentW / aspect;
+  const hi = Math.min(widthLimit, contentH);
+  const lo = Math.min(minPhotoIn, hi);
+  // NaN would propagate through every downstream multiplication and yield a
+  // sheet of NaN boxes. The drag handler derives the target by dividing by a
+  // live preview scale, so a zero scale can produce one; resolve it to the floor.
+  if (Number.isNaN(target)) return lo;
+  return clamp(target, lo, hi);
+}
+
+// Choose companions for the anchored row from ANY photos, maximising width
+// without exceeding contentW at the exact target height.
+//
+// Contiguous rows cannot do this. For the first photo of a twelve-photo sheet
+// the only achievable contiguous heights are 1.16, 1.38, 2.05, 3.40 and 8.00in
+// — dragging toward 5in would snap by 4.6in. Allowing an exact height with
+// contiguous companions instead leaves side gaps up to 4.8in on an 8in width.
+// Free selection holds the gap under an inch through 3in targets.
+export function anchoredRow(aspects, anchorIdx, target, contentW, gutterIn, maxK = 5) {
+  const others = [];
+  for (let i = 0; i < aspects.length; i++) if (i !== anchorIdx) others.push(i);
+
+  const widthOf = (idxs) =>
+    target * idxs.reduce((s, i) => s + aspects[i], 0) + (idxs.length - 1) * gutterIn;
+
+  let best = { indices: [anchorIdx], widthIn: widthOf([anchorIdx]) };
+  if (best.widthIn > contentW + 1e-9) return best; // caller clamps; keep it total
+
+  const chosen = [];
+  const walk = (start, sum) => {
+    const idxs = [anchorIdx, ...chosen];
+    const w = target * (sum + aspects[anchorIdx]) + (idxs.length - 1) * gutterIn;
+    if (w <= contentW + 1e-9 && w > best.widthIn) best = { indices: idxs, widthIn: w };
+    if (idxs.length >= maxK) return;
+    for (let j = start; j < others.length; j++) {
+      const next = sum + aspects[others[j]];
+      // Prune: adding this photo already overflows, and any deeper branch from
+      // here only adds width, so nothing below this j can fit either. Later j
+      // values are still tried — others is not sorted by aspect.
+      if (target * (next + aspects[anchorIdx]) + idxs.length * gutterIn > contentW + 1e-9) continue;
+      chosen.push(others[j]);
+      walk(j + 1, next);
+      chosen.pop();
+    }
+  };
+  walk(0, 0);
+
+  // Keep the row in the user's photo order so it reads predictably.
+  best.indices.sort((a, b) => a - b);
+  return best;
+}
+
+// Anchored layout: pull the anchored row out, solve the remaining photos with
+// the ordinary engine, then insert the anchored row at a row boundary.
+function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
+  const aspects = photos.map((p) => p.aspect);
+  let target = clampTarget(
+    photos[anchorIdx].targetHeightIn,
+    aspects[anchorIdx],
+    contentW,
+    contentH,
+    page.minPhotoIn,
+  );
+
+  // Every other photo still has to land on the page, so the anchored row cannot
+  // claim the whole content height. Reserve a strip for the rest plus a gutter,
+  // and let the anchored row have the remainder: their flush height as one row if
+  // that is small, otherwise minPhotoIn, which is already this app's threshold for
+  // "too small to be worth printing". Capping the reserve matters — a leftover
+  // portrait's flush height can exceed the whole sheet, and reserving that would
+  // squeeze the anchored row to nothing. Measured on two 0.35 portraits dragged to
+  // full height, reserving half the page instead cost the anchor 5.33in; this
+  // costs it 1.58in.
+  //
+  // Reserving before the row is chosen, not after, is what keeps the row's
+  // companions consistent with the height the row is actually drawn at.
+  if (photos.length > 1) {
+    const others = aspects.filter((_, i) => i !== anchorIdx);
+    const flush = Math.max(rowHeight(others, contentW, page.gutterIn), 1e-6);
+    const reserve = Math.min(flush, page.minPhotoIn) + page.gutterIn;
+    target = Math.max(1e-6, Math.min(target, contentH - reserve));
   }
 
-  return { placements, warnings };
+  const row = anchoredRow(aspects, anchorIdx, target, contentW, page.gutterIn);
+  const inRow = new Set(row.indices);
+
+  // Everything else keeps its relative order.
+  const restIdx = [];
+  for (let i = 0; i < photos.length; i++) if (!inRow.has(i)) restIdx.push(i);
+  const restAspects = restIdx.map((i) => aspects[i]);
+  const restPinned = restIdx.map((i) => !!photos[i].pinned);
+
+  // Positive by construction, thanks to the reserve above. It must not be floored
+  // to a positive sliver when negative: solveRows only guarantees that its rows
+  // fit the height it is given, so a floored budget puts the bottom row off the
+  // page — measured at 0.09in past the bottom margin for a portrait dragged to
+  // full page height on an eight-photo sheet.
+  const budget = contentH - target - page.gutterIn;
+  const solved = restIdx.length
+    ? solveRows(restAspects, contentW, budget, page.gutterIn, {
+        pinned: restPinned,
+        ratioCap: page.ratioCap,
+      })
+    : { rows: [], heights: [] };
+
+  const nRows = solved.rows.length;
+  // Vertical position of the anchored row. Total fill is the same whichever
+  // boundary it sits at — the identical rows are used either way — so there is
+  // nothing to optimise here. This is a tie-break, not an optimisation: it picks
+  // the middle boundary so a large anchored row does not always land at the top.
+  const anchorPos = Math.floor(nRows / 2);
+
+  // Assemble the final row list in vertical order.
+  const rowsOut = [];
+  for (let r = 0; r < nRows; r++) {
+    if (r === anchorPos) rowsOut.push({ anchored: true });
+    const [s, e] = solved.rows[r];
+    rowsOut.push({ anchored: false, idx: restIdx.slice(s, e), h: solved.heights[r] });
+  }
+  if (anchorPos >= nRows) rowsOut.push({ anchored: true });
+
+  const heights = rowsOut.map((r) => (r.anchored ? target : r.h));
+  const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
+  // The anchored row keeps its exact requested height; only ordinary rows absorb.
+  const finalH = rowsOut.map((r, i) => (r.anchored ? target : abs.heights[i]));
+
+  const placements = [];
+  let y = page.marginIn + abs.extraGutter;
+
+  rowsOut.forEach((r, ri) => {
+    const idxs = r.anchored ? row.indices : r.idx;
+    // Width is fixed by the pre-absorption height, so growing the row crops.
+    const baseH = heights[ri];
+    const boxH = finalH[ri];
+    const rowW =
+      idxs.reduce((s, i) => s + aspects[i] * baseH, 0) + (idxs.length - 1) * page.gutterIn;
+    let x = page.marginIn + (contentW - rowW) / 2;
+
+    for (const i of idxs) {
+      const wIn = aspects[i] * baseH;
+      const visW = r.anchored ? 1 : 1 - abs.cropFraction;
+      const slack = 1 - visW;
+      const offset = clamp(photos[i].cropOffset ?? 0, -1, 1);
+      const sx = clamp(slack / 2 + (offset * slack) / 2, 0, slack);
+
+      placements.push({
+        photoId: photos[i].id,
+        xIn: x,
+        yIn: y,
+        wIn,
+        hIn: boxH,
+        srcRect: { x: sx, y: 0, w: visW, h: 1 },
+      });
+      x += wIn + page.gutterIn;
+    }
+    y += boxH + page.gutterIn + abs.extraGutter;
+  });
+
+  return { placements, warnings: densityWarnings(placements, page) };
 }

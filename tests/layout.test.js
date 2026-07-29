@@ -257,3 +257,110 @@ test('a clamped row is centred rather than left-aligned', () => {
   assert.ok(Math.abs(leftGap - rightGap) < 1e-6, `left ${leftGap} right ${rightGap}`);
   assert.ok(leftGap > 0, 'a clamped row should have slack on both sides');
 });
+
+import { clampTarget, anchoredRow } from '../src/layout.js';
+
+test('clampTarget keeps a photo inside the page', () => {
+  const CW = 8, CH = 10.5;
+  // A 1.5-aspect photo at 6in tall would be 9in wide — wider than the page.
+  assert.ok(clampTarget(6, 1.5, CW, CH, 1.5) * 1.5 <= CW + 1e-9);
+  // Below the floor clamps up.
+  assert.equal(clampTarget(0.2, 1.5, CW, CH, 1.5), 1.5);
+  // A value already legal passes through.
+  assert.equal(clampTarget(3, 1.5, CW, CH, 1.5), 3);
+  // Never taller than the page.
+  assert.ok(clampTarget(99, 0.5, CW, CH, 1.5) <= CH + 1e-9);
+});
+
+test('anchoredRow always includes the anchor and never overflows the width', () => {
+  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1, 1.78];
+  for (let i = 0; i < aspects.length; i++) {
+    for (const t of [1.5, 2, 2.5, 3]) {
+      const r = anchoredRow(aspects, i, t, 8, 0.08);
+      assert.ok(r.indices.includes(i), `anchor ${i} missing at t=${t}`);
+      assert.equal(new Set(r.indices).size, r.indices.length, 'no duplicates');
+      assert.ok(r.widthIn <= 8 + 1e-9, `width ${r.widthIn} overflows at t=${t}`);
+    }
+  }
+});
+
+test('anchoredRow fills the width well at moderate targets', () => {
+  // Measured: free grouping holds the side gap under an inch through 3in.
+  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1, 1.78];
+  for (const t of [1.5, 2, 2.5]) {
+    const r = anchoredRow(aspects, 0, t, 8, 0.08);
+    assert.ok(8 - r.widthIn < 1.0, `gap ${(8 - r.widthIn).toFixed(2)}in at t=${t}`);
+  }
+});
+
+test('an anchored photo is placed at its target height', () => {
+  const photos = [1.5, 1.78, 1, 0.67, 1.33, 1.5].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  photos[2].targetHeightIn = 2.5;
+  const { placements } = layout(photos, LETTER);
+  const p = placements.find((x) => x.photoId === 'p2');
+  assert.ok(Math.abs(p.hIn - 2.5) < 1e-6, `height ${p.hIn}, expected 2.5`);
+});
+
+test('anchoring places every photo exactly once and stays on the page', () => {
+  const mixed = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1, 1.78];
+  // One input is not enough: the anchored row's height is taken out of the page
+  // before the rest are solved, so the arithmetic has to hold for a target large
+  // enough to leave the rest almost nothing.
+  const cases = [
+    { aspects: mixed, at: 5, target: 3 },
+    { aspects: mixed, at: 7, target: 2.5 },              // the last photo
+    { aspects: mixed, at: 3, target: 99 },               // a portrait past the page
+    { aspects: Array(20).fill(1.5), at: 0, target: 5 },  // large target, many photos
+    { aspects: Array(20).fill(0.67), at: 19, target: 99 },
+    { aspects: [1.5, 1], at: 0, target: 2 },             // the row holds every photo
+  ];
+  for (const { aspects, at, target } of cases) {
+    const photos = aspects.map((a, i) => ({ id: `p${i}`, aspect: a }));
+    photos[at].targetHeightIn = target;
+    const { placements } = layout(photos, LETTER);
+    const where = `${aspects.length} photos, anchor ${at} at ${target}in`;
+    assert.equal(placements.length, photos.length, where);
+    assert.equal(new Set(placements.map((p) => p.photoId)).size, photos.length, where);
+    for (const p of placements) {
+      assert.ok(p.xIn >= LETTER.marginIn - 1e-6, `${where}: left ${p.xIn}`);
+      assert.ok(p.yIn >= LETTER.marginIn - 1e-6, `${where}: top ${p.yIn}`);
+      assert.ok(
+        p.xIn + p.wIn <= LETTER.widthIn - LETTER.marginIn + 1e-6,
+        `${where}: right ${p.xIn + p.wIn}`,
+      );
+      assert.ok(
+        p.yIn + p.hIn <= LETTER.heightIn - LETTER.marginIn + 1e-6,
+        `${where}: bottom ${p.yIn + p.hIn}`,
+      );
+    }
+  }
+});
+
+test('an over-large target is clamped rather than overflowing', () => {
+  const photos = [1.5, 1.78, 1].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  photos[0].targetHeightIn = 99;
+  const { placements } = layout(photos, LETTER);
+  for (const p of placements) {
+    assert.ok(p.xIn + p.wIn <= LETTER.widthIn - LETTER.marginIn + 1e-6);
+    assert.ok(p.yIn + p.hIn <= LETTER.heightIn - LETTER.marginIn + 1e-6);
+  }
+});
+
+test('no anchor means output is unchanged', () => {
+  // The regression guard: this change must be purely additive.
+  const mk = () => [1, 1.33, 1.5, 1.78, 1, 1.33, 1.5, 1.78, 1, 1.33, 1.5, 1.78]
+    .map((a, i) => ({ id: `p${i}`, aspect: a }));
+  const withField = mk().map((p) => ({ ...p, targetHeightIn: null }));
+  assert.deepEqual(layout(withField, LETTER), layout(mk(), LETTER));
+});
+
+test('clearing an anchor restores the original layout', () => {
+  const mk = () => [1.5, 1.78, 1, 0.67, 1.33, 1.5].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  const before = layout(mk(), LETTER);
+  const anchored = mk();
+  anchored[1].targetHeightIn = 2.5;
+  layout(anchored, LETTER);
+  const cleared = mk();
+  cleared[1].targetHeightIn = null;
+  assert.deepEqual(layout(cleared, LETTER), before);
+});
