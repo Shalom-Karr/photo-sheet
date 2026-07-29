@@ -4,7 +4,7 @@
 
 **Goal:** A local web app that packs photos of mixed aspect ratios onto a single printable sheet with minimal blank space, re-solving automatically as photos are added or removed.
 
-**Architecture:** One pure function `layout(photos, page) → placements` carries all the risk and all the math; everything else is plumbing. Rows are solved to be flush with the content width, row break points come from an O(n²) dynamic program, and the target row height is binary-searched so the page fills vertically. Placements are emitted in **inches** — the preview scales by a screen factor, PNG by 300, PDF by 72, so preview and print can never drift.
+**Architecture:** One pure function `layout(photos, page) → placements` carries all the risk and all the math; everything else is plumbing. Rows are solved to be flush with the content width, and a windowed O(n²) dynamic program maximises page fill subject to a cap on how much row heights may differ (see Amendment 1). Placements are emitted in **inches** — the preview scales by a screen factor, PNG by 300, PDF by 72, so preview and print can never drift.
 
 **Tech Stack:** Vanilla ES modules (no build step, no framework), Tailwind via CDN, `pdf-lib` via ESM CDN, `node --test` for unit tests (zero dependencies).
 
@@ -14,7 +14,7 @@
 - No frontend framework. No bundler. No transpiler.
 - `layout.js` must remain **pure**: no DOM access, no imports, no I/O. It is the only unit-tested module and must be importable unchanged in both Node and the browser.
 - All geometry in `layout.js` is in **inches**. Pixel and point conversion happens only in renderers.
-- Page defaults: 8.5 × 11 in, margin 0.25 in, gutter 0.08 in, crop tolerance 0.06, minimum photo dimension 1.5 in.
+- Page defaults: 8.5 × 11 in, margin 0.25 in, gutter 0.08 in, crop tolerance 0.06, minimum photo dimension 1.5 in, row-height ratio cap 3.
 - Crop is **horizontal only** — rows are width-constrained, so absorbing residual height always trims left/right edges.
 - Single sheet only. Overflow raises a density warning; it never flows to page 2.
 - Tests run with `node --test` — **no path argument**. On Node 22 for Windows, `node --test tests/` resolves the path as a module and fails with `MODULE_NOT_FOUND`; bare `node --test` auto-discovers `tests/*.test.js` correctly. Requires `"type": "module"` in `package.json`.
@@ -277,7 +277,12 @@ removes the failure mode rather than tuning around it."
 
 ---
 
-### Task 3: Binary search the target height
+### Task 3: Binary search the target height — SUPERSEDED
+
+> **This task was implemented, measured, and replaced. Do not build from it.**
+> Binary-searching a uniformity-minimising DP caps page fill at 40-76%.
+> See **Amendment 1** at the end of this plan for the task that replaces it,
+> and the design spec's "Superseded approach, and why it failed" for the data.
 
 **Files:**
 - Modify: `src/layout.js`
@@ -1646,3 +1651,259 @@ No gaps.
 **Type consistency:** `Photo` carries `{ id, blob, url, mime, naturalW, naturalH, aspect, cropOffset, pinned }` in tasks 6, 7, 9, 10 and 11. `Placement` carries `{ photoId, xIn, yIn, wIn, hIn, srcRect }` in tasks 5, 6, 8 and 9. `srcRect` is `{ x, y, w, h }` normalised 0..1 throughout. `layout()` returns `{ placements, warnings }` at every call site.
 
 **Deferred, by design:** column grouping for mixed orientation, HEIC decoding, multi-page flow, portable export bundles.
+
+---
+
+## Amendment 1 — Task 3 replaced
+
+**Why.** Task 3 as originally written was implemented (commit `9658e87`) and measured. Binary-searching a target height that a squared-deviation DP minimises against does **not** fill the page. Minimising height deviation rewards rows of near-equal height, which means near-equal photo counts, so the reachable layouts collapse to "k per row" and total height jumps geometrically between them:
+
+```
+12 → 6,6 → 4,4,4 → 3,3,3,3 → (overflow)
+      0.42   1.89    4.31     7.73      12.34    inches
+```
+
+The content height, 10.5 in, sits in the gap. Binary search returns 7.73 in — **73.6% fill** — while brute force over all 2048 partitions found 99.9% available. Measured fill by ratio cap: cap 3 → 85–96%, cap 2 → 75–96%, cap 1.5 (the old behaviour) → 40–74%.
+
+**Decision.** Row heights may differ by up to `ratioCap` (default 3), exposed as a Density vs Evenness slider.
+
+**Also fixed here.** A single 2:3 portrait spans the content width at 12 in tall on an 11 in page. That is ordinary use, not an edge case, so row height is clamped to the content height; a clamped row is not flush and gets centred by `layout()`.
+
+### Task 3A: Fill maximisation within a row-height window
+
+**Files:**
+- Modify: `src/layout.js`
+- Test: `tests/layout.test.js`
+
+**Interfaces:**
+- Consumes: `rowHeight`, `totalHeight`
+- Produces: `solveRows(aspects, contentW, contentH, gutterIn, opts = {}) → { rows, heights }`, `opts = { pinned = [], ratioCap = 3, windowSteps = 160 }`. `heights[i]` is the solved height of `rows[i]` and may be less than the flush height when clamped.
+- **Removes:** `breakRows` and its three tests. It is superseded and would be dead code. The `totalHeight` test is rewritten to build rows literally instead of via `breakRows`.
+
+- [ ] **Step 1: Delete the superseded code and tests**
+
+Remove the `breakRows` function from `src/layout.js`. Remove these three tests from `tests/layout.test.js`: `rows cover every photo exactly once, in order`, `a larger target height produces more rows`, `DP beats greedy on a set built to strand a runt final row`. Keep `totalHeight` and `rowHeight`.
+
+Replace the `totalHeight` test with one that does not depend on `breakRows`:
+
+```js
+test('totalHeight sums rows plus the gutters between them', () => {
+  const aspects = [1.5, 1.5, 1.5, 1.5];
+  const rows = [[0, 2], [2, 4]];
+  // Each row: two 1.5-aspect photos across 8in with one 0.08 gutter.
+  // h = (8 - 0.08) / 3 = 2.64. Two rows plus one gutter between them.
+  assert.ok(Math.abs(totalHeight(aspects, rows, 8, 0.08) - (2.64 * 2 + 0.08)) < 1e-9);
+});
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+Append to `tests/layout.test.js`:
+
+```js
+import { solveRows } from '../src/layout.js';
+
+const CW = 8.0;   // 8.5 - 2*0.25
+const CH = 10.5;  // 11  - 2*0.25
+
+const fill = (r, contentH = CH) =>
+  (r.heights.reduce((a, b) => a + b, 0) + (r.rows.length - 1) * 0.08) / contentH;
+
+test('rows are contiguous and cover every photo once', () => {
+  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1];
+  const { rows } = solveRows(aspects, CW, CH, 0.08);
+  assert.equal(rows[0][0], 0);
+  assert.equal(rows[rows.length - 1][1], aspects.length);
+  for (let i = 1; i < rows.length; i++) assert.equal(rows[i][0], rows[i - 1][1]);
+});
+
+test('never overflows the content height', () => {
+  const sets = [
+    [1.5],
+    [0.67],
+    [1.5, 1.78],
+    Array.from({ length: 20 }, (_, i) => [1, 1.25, 1.33, 1.5, 1.78][i % 5]),
+  ];
+  for (const aspects of sets) {
+    const r = solveRows(aspects, CW, CH, 0.08);
+    const used = r.heights.reduce((a, b) => a + b, 0) + (r.rows.length - 1) * 0.08;
+    assert.ok(used <= CH + 1e-6, `used ${used} for ${aspects.length} photos`);
+  }
+});
+
+test('fills the page far better than near-uniform rows did', () => {
+  // The superseded binary-search design scored 0.736 on this exact input.
+  const aspects = Array.from({ length: 12 }, (_, i) => [1, 1.33, 1.5, 1.78][i % 4]);
+  assert.ok(fill(solveRows(aspects, CW, CH, 0.08)) > 0.84);
+});
+
+test('ten identical landscapes fill the page', () => {
+  // Scored 0.470 under the superseded design.
+  assert.ok(fill(solveRows(Array(10).fill(1.5), CW, CH, 0.08)) > 0.85);
+});
+
+test('a lower ratio cap trades fill for evenness', () => {
+  const aspects = Array.from({ length: 12 }, (_, i) => [1, 1.33, 1.5, 1.78][i % 4]);
+  const loose = solveRows(aspects, CW, CH, 0.08, { ratioCap: 3 });
+  const tight = solveRows(aspects, CW, CH, 0.08, { ratioCap: 1.5 });
+  const spread = (r) => Math.max(...r.heights) / Math.min(...r.heights);
+  assert.ok(spread(tight) <= spread(loose) + 1e-9);
+  assert.ok(fill(tight) <= fill(loose) + 1e-9);
+});
+
+test('no row height exceeds the cap times the shortest, absent pinning', () => {
+  const aspects = Array.from({ length: 14 }, (_, i) => [1, 1.33, 1.5, 1.78, 0.67, 0.75][i % 6]);
+  const r = solveRows(aspects, CW, CH, 0.08, { ratioCap: 3 });
+  assert.ok(Math.max(...r.heights) / Math.min(...r.heights) <= 3 + 1e-6);
+});
+
+test('a single portrait is clamped to the page instead of overflowing', () => {
+  // 8 / 0.667 = 12in tall, taller than the 10.5in content height.
+  const r = solveRows([0.667], CW, CH, 0.08);
+  assert.equal(r.rows.length, 1);
+  assert.ok(r.heights[0] <= CH + 1e-9, `height ${r.heights[0]} exceeds page`);
+});
+
+test('a pinned photo takes a row alone even when that breaks the window', () => {
+  const aspects = [1.5, 1.78, 1, 1.33];
+  const pinned = [false, true, false, false];
+  const { rows } = solveRows(aspects, CW, CH, 0.08, { pinned });
+  assert.ok(rows.some(([s, e]) => s === 1 && e === 2), 'pinned photo must be alone');
+});
+
+test('empty input yields no rows', () => {
+  assert.deepEqual(solveRows([], CW, CH, 0.08).rows, []);
+});
+```
+
+- [ ] **Step 3: Run tests to verify they fail**
+
+Run: `npm test`
+Expected: FAIL — `solveRows` is not exported.
+
+- [ ] **Step 4: Write the implementation**
+
+Append to `src/layout.js`:
+
+```js
+// Maximise page fill using only rows whose height falls inside a window
+// [lo, lo*ratioCap], sweeping the window across the plausible range.
+//
+// The superseded approach minimised each row's deviation from a target height
+// and binary-searched the target. That rewards rows of near-equal height, hence
+// near-equal photo counts, so reachable layouts collapse to "k photos per row"
+// and total height jumps geometrically — leaving the page height in a gap and
+// fill stuck at 40-76%. Capping the ratio instead of minimising the spread
+// reaches 85-96%.
+export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
+  const { pinned = [], ratioCap = 3, windowSteps = 160 } = opts;
+  const n = aspects.length;
+  if (n === 0) return { rows: [], heights: [] };
+
+  // A row's height is bounded below by putting every photo in one row, and
+  // above by the tallest single photo spanning the full width.
+  const allInOne = rowHeight(aspects, contentW, gutterIn);
+  const tallestSingle = Math.max(...aspects.map((a) => contentW / a));
+  const loMin = Math.max(1e-6, Math.min(allInOne, tallestSingle));
+  const loMax = Math.max(allInOne, tallestSingle, loMin);
+
+  // A single photo can be taller than the whole page (a 2:3 portrait spanning
+  // 8in is 12in tall). Clamping keeps it on the sheet; layout() centres any row
+  // that is consequently not flush.
+  const heightOf = (i, j) =>
+    Math.min(rowHeight(aspects.slice(i, j), contentW, gutterIn), contentH);
+
+  let best = null;
+
+  for (let s = 0; s <= windowSteps; s++) {
+    const lo = loMin * Math.pow(loMax / loMin, s / windowSteps);
+    const hi = lo * ratioCap;
+
+    const dp = new Array(n + 1).fill(-Infinity);
+    const prev = new Array(n + 1).fill(-1);
+    dp[0] = 0;
+
+    for (let j = 1; j <= n; j++) {
+      for (let i = 0; i < j; i++) {
+        if (dp[i] === -Infinity) continue;
+
+        let hasPinned = false;
+        for (let k = i; k < j; k++) if (pinned[k]) { hasPinned = true; break; }
+        if (hasPinned && j - i > 1) continue;
+
+        const h = heightOf(i, j);
+        if (!(h > 0)) continue;
+        // A pinned row is exempt from the window: it spans the full width by
+        // definition, and constraining it would make pinning fail to solve.
+        if (!hasPinned && (h < lo * (1 - 1e-9) || h > hi * (1 + 1e-9))) continue;
+
+        const total = dp[i] + h + (i > 0 ? gutterIn : 0);
+        // The ceiling belongs here, not on the window's best total. A window
+        // that permits an overflowing layout usually permits an excellent
+        // fitting one too; rejecting the window wholesale loses it.
+        if (total > contentH + 1e-9) continue;
+
+        if (total > dp[j]) { dp[j] = total; prev[j] = i; }
+      }
+    }
+
+    if (dp[n] === -Infinity) continue;
+
+    const rows = [];
+    for (let j = n; j > 0; j = prev[j]) rows.unshift([prev[j], j]);
+    const heights = rows.map(([a, b]) => heightOf(a, b));
+    const ratio = Math.max(...heights) / Math.min(...heights);
+
+    // Prefer fill; break near-ties within 1% of the page toward the tidier layout.
+    const better =
+      !best ||
+      dp[n] > best.total + contentH * 0.01 ||
+      (Math.abs(dp[n] - best.total) <= contentH * 0.01 && ratio < best.ratio);
+    if (better) best = { total: dp[n], rows, heights, ratio };
+  }
+
+  if (best) return { rows: best.rows, heights: best.heights };
+
+  // No window admitted a fitting layout. Give each photo its own clamped row so
+  // callers still get a well-formed result; the density warning will fire.
+  const rows = aspects.map((_, i) => [i, i + 1]);
+  return { rows, heights: rows.map(([a, b]) => heightOf(a, b)) };
+}
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `npm test`
+Expected: PASS. Task 1's 4 tests, the rewritten `totalHeight` test, and the 9 new tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/layout.js tests/layout.test.js
+git commit -m "Replace binary search with windowed fill maximisation
+
+Minimising each row's deviation from a target height rewards rows of
+near-equal height, so reachable layouts collapse to k-photos-per-row and
+total height jumps geometrically. The page height lands in a gap and fill
+sticks at 73.6% where brute force finds 99.9%.
+
+Capping how much row heights may differ, then maximising fill inside that
+window, reaches 85-96% and matches brute-force optimum on seven of nine
+test sets. The ceiling is enforced inside the DP relaxation: rejecting a
+window on its best total discards the good fitting layouts it also holds.
+
+Row height is clamped to the page because a lone 2:3 portrait is 12in tall
+across an 8in column, which is ordinary use rather than an edge case."
+```
+
+### Consequential changes to later tasks
+
+**Task 4** (`absorbResidual`) is unchanged.
+
+**Task 5** (`layout()`) changes in three ways:
+
+1. `LETTER` gains `ratioCap: 3`, and its Task 1 test asserts it.
+2. `solveRows` is called as `solveRows(aspects, contentW, contentH, page.gutterIn, { pinned, ratioCap: page.ratioCap })`.
+3. Rows that are not flush — because a row was height-clamped — are **centred**. Compute the row's true width as `Σ(aspect × rowHeight) + gutters` and start it at `marginIn + (contentW − rowWidth) / 2`. For flush rows this offset is zero, so one expression covers both cases.
+
+**Task 6** (app shell) gains a Density vs Evenness slider bound to `page.ratioCap`, range 1.0–5.0, step 0.1, default 3.

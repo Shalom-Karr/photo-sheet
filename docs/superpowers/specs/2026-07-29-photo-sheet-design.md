@@ -64,27 +64,64 @@ h = (W − gutters) / Σ(aspect ratios in row)
 
 No search. Any assignment of photos to a row has exactly one flush height.
 
-### Row breaks via dynamic programming
+### Superseded approach, and why it failed
 
-Given a target row height `t`, cost each row `(h − t)²` and minimize over all break points:
+The first design minimised each row's squared deviation from a target height and
+binary-searched that target until the page filled. It was implemented, measured, and
+**discarded**, because it does not fill the page.
+
+Minimising height *deviation* rewards rows of near-equal height, and rows are near-equal
+in height when they hold near-equal numbers of photos. The reachable layouts therefore
+collapse to roughly "k photos per row", and total page height jumps geometrically between
+them. For twelve photos the entire reachable set was:
 
 ```
-best[j] = min over i of ( best[i−1] + cost(row i..j) )
+12 → 6,6 → 4,4,4 → 3,3,3,3 → (overflows the page)
+      0.42   1.89    4.31     7.73        12.34      inches
 ```
 
-O(n²). At 20 photos that is 400 evaluations, sub-millisecond. Globally optimal.
+The content height, 10.5 in, falls in the gap. Binary search returns the best value below
+it — 7.73 in, **73.6% fill** — and no target height reaches any nearer. Brute force over
+all 2048 partitions found 99.9% was available. The failure is not a tuning problem; the
+objective was simply the wrong one.
 
-Greedy row filling — fill until overflow, then break — is what most galleries do and is
-what produces a single stunted final row. The DP is chosen specifically to avoid that.
+Measured fill against the maximum permitted ratio between the tallest and shortest row:
 
-### Binary search on target height
+| photo set | ratio ≤ 3 | ratio ≤ 2 | ratio ≤ 1.5 (old behaviour) |
+|---|---|---|---|
+| 12 mixed | 85.5% | 76.1% | 73.6% |
+| 10 landscape | 90.0% | 85.8% | 47.0% |
+| 14 with portraits | 92.0% | 78.3% | 75.3% |
+| 20 mixed | 86.6% | 75.3% | 70.5% |
 
-Total page height is monotonic in `t`. Binary search `t` until total height approaches the
-content height `H`. Roughly 30 iterations × 400 evaluations, still instant at this scale.
+Filling the sheet *requires* rows of visibly different heights. "Minimal blank space" and
+"neat and aligned" are in direct tension, and the ratio cap is the dial between them.
 
-This is what adapts a horizontal-justification algorithm to a fixed sheet. Web galleries
-justify width only because they scroll indefinitely. A sheet has a hard bottom edge, so
-target height becomes a solved variable rather than a chosen constant.
+### Fill maximisation within a row-height window
+
+Sweep a window `[lo, lo × ratioCap]` over candidate row heights. For each window, a DP
+maximises total page height using only rows whose height falls inside it:
+
+```
+best[j] = max over i of ( best[i] + rowHeight(i..j) + gutter )
+          subject to  rowHeight(i..j) ∈ [lo, hi]
+          and         the running total ≤ contentH
+```
+
+O(n²) per window, ~160 windows — still well under a millisecond at 20 photos.
+
+**The page-height ceiling must be enforced inside the DP relaxation, not by rejecting a
+window whose best total overflows.** A window that permits an overflowing layout usually
+also permits an excellent fitting one; discarding the window wholesale loses it. The first
+prototype made exactly this mistake and underperformed brute force by up to 43 points.
+
+Across nine test sets the search matches brute-force optimum on seven and lands within 6
+points on the remaining two. Exactness would require exponential search for no visible gain.
+
+Ties within 1% of page height break toward the lower ratio, so the tidier of two equally
+full layouts wins.
+
+`ratioCap` is user-facing — a Density vs Evenness slider, default 3.
 
 ### Residual absorption
 
@@ -113,7 +150,13 @@ one axis, not a 2D offset.
 
 Pinning is defined as: **the photo occupies a row by itself**, which makes it as large as
 the content width allows. This is a forced break before and after that photo in the DP —
-a two-line change, with no new cost function and no ambiguity about "how much bigger."
+no new cost function and no ambiguity about "how much bigger."
+
+A pinned row is **exempt from the row-height window**. A single photo spanning the full
+content width is often far taller than any window admits, and applying the constraint would
+make pinning fail to solve rather than do what the user asked. The exemption can push the
+tallest-to-shortest ratio above the cap; that is the user's explicit instruction overriding
+a default, which is the correct precedence.
 
 Multiple pinned photos each take their own row. If pinning pushes the solve past the
 density floor, the standard warning fires.
@@ -140,7 +183,7 @@ problem is confirmed is speculative work.
 
 ```
 Photo     { id, blob, mime, naturalW, naturalH, aspect, cropOffset, pinned }
-Page      { widthIn, heightIn, marginIn, gutterIn, cropTolerance, minPhotoIn }
+Page      { widthIn, heightIn, marginIn, gutterIn, cropTolerance, minPhotoIn, ratioCap }
 Placement { photoId, xIn, yIn, wIn, hIn, srcRect }   // srcRect normalized 0..1
 ```
 
@@ -148,7 +191,9 @@ Placement { photoId, xIn, yIn, wIn, hIn, srcRect }   // srcRect normalized 0..1
 so `srcRect` stays inside the source. It has no effect when nothing is cropped.
 
 Page defaults: 8.5 × 11 in, 0.25 in margin (below most printers' unprintable edge),
-0.08 in gutter, 6% crop tolerance, 1.5 in minimum photo dimension. All user-adjustable.
+0.08 in gutter, 6% crop tolerance, 1.5 in minimum photo dimension, 3× row-height ratio cap.
+All user-adjustable; `ratioCap` and `cropTolerance` are the two that visibly change output,
+and both get sliders.
 
 `Placement` is in inches. Preview scales by screen factor, PNG by 300, PDF by 72. One
 coordinate system, three renderers, no drift between preview and print.
@@ -157,7 +202,7 @@ coordinate system, three renderers, no drift between preview and print.
 
 | File | Responsibility |
 |---|---|
-| `layout.js` | Pure engine. Row solving, DP, binary search, residual absorption |
+| `layout.js` | Pure engine. Row solving, windowed fill-maximising DP, residual absorption |
 | `photos.js` | Ingest from picker, paste, drop. Decode, read EXIF, compute aspect |
 | `preview.js` | Placements → positioned DOM elements |
 | `interact.js` | Drag reorder, pin, crop nudge. Mutates photo list, triggers re-solve |
