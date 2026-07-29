@@ -53,19 +53,20 @@ attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected
   if (rejected.length) alert(rejected.join('\n'));
 });
 
-document.getElementById('pdf').addEventListener('click', async () => {
-  const { placements } = layout(state.photos, state.page);
-  await downloadPdf(state.photos, placements, state.page);
-});
+function exportHandler(label, fn) {
+  return async () => {
+    try {
+      const { placements } = layout(state.photos, state.page);
+      await fn(state.photos, placements, state.page);
+    } catch (e) {
+      console.error(e);
+      alert(`${label} failed: ${e.message}`);
+    }
+  };
+}
 
-document.getElementById('png').addEventListener('click', async () => {
-  const { placements } = layout(state.photos, state.page);
-  await downloadPng(state.photos, placements, state.page);
-});
-
-document.getElementById('print').addEventListener('click', async () => {
-  const { placements } = layout(state.photos, state.page);
-  await printPdf(state.photos, placements, state.page);
-});
+document.getElementById('pdf').addEventListener('click', exportHandler('PDF export', downloadPdf));
+document.getElementById('png').addEventListener('click', exportHandler('PNG export', downloadPng));
+document.getElementById('print').addEventListener('click', exportHandler('Print', printPdf));
 
 rerender();

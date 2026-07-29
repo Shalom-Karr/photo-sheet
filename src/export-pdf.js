@@ -20,10 +20,16 @@ async function embedPhoto(doc, photo) {
   });
   const imgEl = new Image();
   imgEl.src = photo.url;
-  await new Promise((res, rej) => { imgEl.onload = res; imgEl.onerror = rej; });
+  await new Promise((res, rej) => {
+    imgEl.onload = res;
+    imgEl.onerror = () => rej(new Error(`Failed to load image ${photo.id} for canvas re-encode`));
+  });
   canvas.getContext('2d').drawImage(imgEl, 0, 0);
-  const pngBytes = await new Promise((res) =>
-    canvas.toBlob((b) => b.arrayBuffer().then((ab) => res(new Uint8Array(ab))), 'image/png'));
+  const pngBytes = await new Promise((res, rej) =>
+    canvas.toBlob((b) => {
+      if (!b) { rej(new Error(`canvas.toBlob returned null for photo ${photo.id}`)); return; }
+      b.arrayBuffer().then((ab) => res(new Uint8Array(ab)), rej);
+    }, 'image/png'));
   return doc.embedPng(pngBytes);
 }
 
