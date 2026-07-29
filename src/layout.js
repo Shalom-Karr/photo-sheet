@@ -241,9 +241,12 @@ export function clampTarget(target, aspect, contentW, contentH, minPhotoIn) {
 // — dragging toward 5in would snap by 4.6in. Allowing an exact height with
 // contiguous companions instead leaves side gaps up to 4.8in on an 8in width.
 // Free selection holds the gap under an inch through 3in targets.
-export function anchoredRow(aspects, anchorIdx, target, contentW, gutterIn, maxK = 5) {
+//
+// excluded is a boolean array parallel to aspects marking photos that may not be
+// drafted in as companions. The anchor is always in the row whatever its flag.
+export function anchoredRow(aspects, anchorIdx, target, contentW, gutterIn, maxK = 5, excluded = []) {
   const others = [];
-  for (let i = 0; i < aspects.length; i++) if (i !== anchorIdx) others.push(i);
+  for (let i = 0; i < aspects.length; i++) if (i !== anchorIdx && !excluded[i]) others.push(i);
 
   const widthOf = (idxs) =>
     target * idxs.reduce((s, i) => s + aspects[i], 0) + (idxs.length - 1) * gutterIn;
@@ -306,7 +309,20 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     target = Math.max(1e-6, Math.min(target, contentH - reserve));
   }
 
-  const row = anchoredRow(aspects, anchorIdx, target, contentW, page.gutterIn);
+  // A pin means "a row of my own at full content width", which is as explicit as
+  // the requested size, so a pinned photo is never drafted in as a companion —
+  // that would silently override it. It stays in the rest, where solveRows still
+  // gives it its own row. The anchor itself is exempt: an explicit size supersedes
+  // "full content width" for the one photo being sized.
+  const row = anchoredRow(
+    aspects,
+    anchorIdx,
+    target,
+    contentW,
+    page.gutterIn,
+    5,
+    photos.map((p) => !!p.pinned),
+  );
   const inRow = new Set(row.indices);
 
   // Everything else keeps its relative order.
@@ -345,9 +361,24 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
   if (anchorPos >= nRows) rowsOut.push({ anchored: true });
 
   const heights = rowsOut.map((r) => (r.anchored ? target : r.h));
+
+  // Backstop. solveRows fits its rows inside the height it is given only when it
+  // finds a layout at all; its fallback — one row per photo — does not. A pinned
+  // photo makes that reachable on an ordinary sheet: a pin forbids grouping, so
+  // three leftover photos need three rows where one flush row would have done,
+  // and three full-width rows do not fit a strip. Shrink every row to fit instead
+  // of running off the page. The anchored row gives up its exact height only here,
+  // where the sheet cannot honour it at all.
+  const gutters = (heights.length - 1) * page.gutterIn;
+  const sumH = heights.reduce((a, b) => a + b, 0);
+  if (sumH + gutters > contentH && sumH > 0) {
+    const shrink = Math.max(0, contentH - gutters) / sumH;
+    for (let i = 0; i < heights.length; i++) heights[i] *= shrink;
+  }
+
   const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
-  // The anchored row keeps its exact requested height; only ordinary rows absorb.
-  const finalH = rowsOut.map((r, i) => (r.anchored ? target : abs.heights[i]));
+  // The anchored row keeps the height it asked for; only ordinary rows absorb.
+  const finalH = rowsOut.map((r, i) => (r.anchored ? heights[i] : abs.heights[i]));
 
   const placements = [];
   let y = page.marginIn + abs.extraGutter;

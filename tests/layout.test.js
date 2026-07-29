@@ -354,6 +354,30 @@ test('no anchor means output is unchanged', () => {
   assert.deepEqual(layout(withField, LETTER), layout(mk(), LETTER));
 });
 
+test('a pinned photo is not drafted into the anchored row', () => {
+  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5];
+  const excluded = [false, false, true, false, false, false];
+  const r = anchoredRow(aspects, 0, 2, 8, 0.08, 5, excluded);
+  assert.ok(!r.indices.includes(2), 'pinned photo 2 must not be a companion');
+  assert.ok(r.indices.includes(0), 'anchor must still be present');
+});
+
+test('a pinned photo still gets its own row when another photo is anchored', () => {
+  const photos = [1.5, 1.78, 1, 0.67, 1.33, 1.5].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  photos[2].pinned = true;
+  photos[0].targetHeightIn = 2;
+  const { placements } = layout(photos, LETTER);
+  const pin = placements.find((p) => p.photoId === 'p2');
+  const sameRow = placements.filter((p) => Math.abs(p.yIn - pin.yIn) < 1e-6);
+  assert.equal(sameRow.length, 1, 'pinned photo must be alone on its row');
+  // A pin forbids grouping, so the leftover photos need a row each — more height
+  // than the strip beside a 2in anchor holds. Everything must still be on the page.
+  for (const p of placements) {
+    assert.ok(p.yIn + p.hIn <= LETTER.heightIn - LETTER.marginIn + 1e-6, `bottom ${p.yIn + p.hIn}`);
+    assert.ok(p.xIn + p.wIn <= LETTER.widthIn - LETTER.marginIn + 1e-6, `right ${p.xIn + p.wIn}`);
+  }
+});
+
 test('clearing an anchor restores the original layout', () => {
   const mk = () => [1.5, 1.78, 1, 0.67, 1.33, 1.5].map((a, i) => ({ id: `p${i}`, aspect: a }));
   const before = layout(mk(), LETTER);
