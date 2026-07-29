@@ -526,7 +526,10 @@ by hand, which is worse than not saving it at all."
 
 ---
 
-### Task 4: The resize handle
+### Task 4: The resize handle — SUPERSEDED
+
+> **Replaced by Task 4A in Amendment 1 at the end of this plan.** The user asked
+> for edge handles, not just a corner. Build from the amendment.
 
 **Files:**
 - Modify: `src/preview.js`
@@ -712,3 +715,214 @@ No gaps. The spec's "row order was never biased big-at-top" section requires no 
 **Type consistency:** `targetHeightIn` is the field name in tasks 2, 3 and 4. `clampTarget(target, aspect, contentW, contentH, minPhotoIn)` and `anchoredRow(aspects, anchorIdx, target, contentW, gutterIn, maxK)` are used with those signatures in task 2 only. `attachInteractions` gains a fourth parameter `currentScale` in task 4, which is the only call-site change.
 
 **Known risk to watch in review:** `layoutAnchored` duplicates the placement-assembly loop from `layout()`. That duplication is deliberate for a first cut — the anchored row differs in crop handling and height source — but if the review judges the two loops close enough to share, extracting a common emitter is the right call.
+
+---
+
+## Amendment 1 — Task 4 replaced: edge handles, not just a corner
+
+**Why.** The user asked for edge handles: hover an edge, a line appears, drag it to make the photo wider or narrower, with the layout reflowing rather than cropping.
+
+**This needs no engine change at all.** For an uncropped photo, width and height are locked together by aspect ratio, so a width target is exactly a height target: `targetHeightIn = width / aspect`. Verified — a 4.0000 in width request on a 1:1 photo produces a placement measuring `wIn = 4.0000`.
+
+The "push the neighbour to another row" behaviour also arrives free. Measured, dragging photo 0 of `[1.5, 1.78, 1, 0.67, 1.33, 1.5]` wider:
+
+| target width | photos in its row | rowmates | actual `wIn` |
+|---|---|---|---|
+| 2.5 in | 3 | p0, p1, p4 | 2.500 |
+| 3.5 in | 2 | p0, p1 | 3.500 |
+| 5.0 in | 2 | p0, p3 | 5.000 |
+| 6.0 in | 1 | p0 | 6.000 |
+| 8.0 in | 1 | p0 | 8.000 |
+
+The row sheds companions as the anchor grows, with no cropping. So this task is purely an interaction change over Task 2's anchor.
+
+### Task 4A: Edge and corner resize handles
+
+**Files:**
+- Modify: `src/preview.js`
+- Modify: `src/interact.js`
+- Modify: `src/main.js`
+
+**Interfaces:**
+- Consumes: `state`, `rerender`, placement boxes carrying `data-photo-id`, and `photo.targetHeightIn` honoured by `layout()`
+- Produces: `attachInteractions(container, state, rerender, currentScale)` — a fourth parameter, a function returning the preview's live scale factor
+
+- [ ] **Step 1: Render five handles per photo**
+
+In `src/preview.js`, inside the placement loop after the box's classes are set, add the handles. `box` must get `relative` positioning context — it is already `absolute`, which is sufficient.
+
+```js
+    // Five handles, all setting one anchor: width and height are locked
+    // together by aspect ratio, so an edge drag and a corner drag are the
+    // same constraint expressed on different axes.
+    const anchored = !!byId.get(pl.photoId)?.targetHeightIn;
+    for (const [edge, cls] of [
+      ['left',   'left-0 top-0 h-full w-1 cursor-ew-resize'],
+      ['right',  'right-0 top-0 h-full w-1 cursor-ew-resize'],
+      ['top',    'top-0 left-0 w-full h-1 cursor-ns-resize'],
+      ['bottom', 'bottom-0 left-0 w-full h-1 cursor-ns-resize'],
+      ['corner', 'bottom-0 right-0 w-3 h-3 cursor-nwse-resize'],
+    ]) {
+      const h = document.createElement('div');
+      h.dataset.resize = pl.photoId;
+      h.dataset.edge = edge;
+      h.className =
+        `absolute ${cls} transition-opacity ` +
+        (anchored ? 'bg-emerald-400 opacity-90' : 'bg-sky-400 opacity-0 hover:opacity-90');
+      box.appendChild(h);
+    }
+```
+
+An anchored photo keeps its handles visible in emerald, so the state is discoverable rather than hidden.
+
+- [ ] **Step 2: Handle the drag**
+
+In `src/interact.js`, inside `attachInteractions(container, state, rerender, currentScale)`:
+
+```js
+  // Pointer events, not HTML5 drag-and-drop, so a resize can never be
+  // confused with the reorder drag or the file-ingest drop.
+  container.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('[data-resize]');
+    if (!handle) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const photo = state.photos.find((p) => p.id === handle.dataset.resize);
+    if (!photo) return;
+    const edge = handle.dataset.edge;
+    const box = handle.closest('[data-photo-id]');
+    const rect = box.getBoundingClientRect();
+
+    // One anchor at a time, and anchoring is not pinning.
+    for (const p of state.photos) if (p !== photo) p.targetHeightIn = null;
+    photo.pinned = false;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const pxPerIn = 96 * currentScale();
+    const startW = rect.width / pxPerIn;
+    const startH = rect.height / pxPerIn;
+
+    let queued = false;
+    let pending = null;
+
+    // Re-solving costs 0.63ms at 12 photos but 8.52ms at 30, dominated by the
+    // solver's window sweep. Coalescing into one frame keeps the drag smooth.
+    const flush = () => {
+      queued = false;
+      if (pending == null) return;
+      photo.targetHeightIn = pending;
+      rerender();
+    };
+
+    const move = (ev) => {
+      const dxIn = (ev.clientX - startX) / pxPerIn;
+      const dyIn = (ev.clientY - startY) / pxPerIn;
+
+      let targetH;
+      if (edge === 'left' || edge === 'right') {
+        const w = edge === 'right' ? startW + dxIn : startW - dxIn;
+        targetH = w / photo.aspect;
+      } else if (edge === 'top' || edge === 'bottom') {
+        targetH = edge === 'bottom' ? startH + dyIn : startH - dyIn;
+      } else {
+        // Corner: follow whichever axis the pointer moved further along.
+        targetH = Math.abs(dxIn) > Math.abs(dyIn)
+          ? (startW + dxIn) / photo.aspect
+          : startH + dyIn;
+      }
+
+      pending = Math.max(0.1, targetH);
+      if (!queued) { queued = true; requestAnimationFrame(flush); }
+    };
+
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      flush();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
+
+  // Double-clicking any handle releases the anchor. Capture and
+  // stopPropagation are both required: the box's own dblclick toggles
+  // pinning, so without them the release would also pin the photo.
+  container.addEventListener('dblclick', (e) => {
+    const handle = e.target.closest('[data-resize]');
+    if (!handle) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const photo = state.photos.find((p) => p.id === handle.dataset.resize);
+    if (!photo) return;
+    photo.targetHeightIn = null;
+    rerender();
+  }, true);
+```
+
+`pending` is clamped only to a floor of 0.1 in here; `layout()`'s `clampTarget` applies the real bounds, so the engine stays the single authority on what is legal.
+
+- [ ] **Step 3: Expose the preview scale from `main.js`**
+
+`src/main.js` computes a fit-to-viewport scale inside `rerender()`. Store it and pass a getter:
+
+```js
+let previewScale = 1;
+```
+
+Inside `rerender()`, where the scale is computed, assign `previewScale = scale;` before calling `renderPreview`.
+
+Then change the interactions call to:
+
+```js
+attachInteractions(sheet, state, rerender, () => previewScale);
+```
+
+- [ ] **Step 4: Verify every gesture in a real browser**
+
+Playwright works on this machine; the Chrome extension is blocked from localhost. Serve with `python -m http.server 8000`.
+
+Inject photos by importing `/src/main.js` and pushing canvas-generated `Photo` objects into `state.photos`, then `rerender()`.
+
+Verify and report each, with measured numbers:
+
+1. Dragging the **right** edge right increases `wIn`; the measured `wIn` tracks the pointer delta converted through `96 * previewScale`.
+2. Dragging the **left** edge left also increases `wIn` (mirrored, not inverted).
+3. Dragging the **bottom** edge down increases `hIn`.
+4. Dragging the **top** edge up also increases `hIn`.
+5. As a photo grows, its row sheds companions — count the placements sharing its `yIn` before and after.
+6. No placement leaves the printable area at any point during the drag.
+7. Double-clicking a handle sets `targetHeightIn` to `null` and leaves `pinned === false`.
+8. A resize drag does not reorder and does not ingest files — photo count and order unchanged.
+9. Console clean throughout.
+
+Stop the server when done.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/preview.js src/interact.js src/main.js
+git commit -m "Size a photo by dragging any of its edges
+
+Width and height are locked together by aspect ratio, so an edge drag and
+a corner drag are one constraint on different axes — all five handles set
+the same anchor and the engine is untouched.
+
+Growing a photo sheds its rowmates to other rows, which is the reflow the
+user wanted instead of cropping. Pointer events rather than HTML5 drag so
+this cannot be confused with the reorder drag or the file-ingest drop, and
+moves are coalesced into a frame because re-solving costs 8.5ms at thirty
+photos."
+```
+
+### Consequential change to Task 5
+
+The README usage table gains edge dragging rather than only a corner:
+
+```markdown
+| Resize one photo | Drag any edge or the corner. The rest reflow around it |
+| Release a resize | Double click the same handle |
+```
+
+And the explanation should say that growing a photo pushes its rowmates to other rows rather than cropping them, with the measured table above as evidence.
