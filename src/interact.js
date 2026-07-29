@@ -10,6 +10,8 @@ export function attachInteractions(container, state, rerender) {
     e.dataTransfer.setData('text/plain', dragId);
   });
 
+  container.addEventListener('dragend', () => { dragId = null; });
+
   container.addEventListener('dragover', (e) => {
     if (dragId) e.preventDefault();
   });
