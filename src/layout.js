@@ -14,51 +14,6 @@ export function rowHeight(aspects, contentW, gutterIn) {
   return (contentW - (aspects.length - 1) * gutterIn) / sum;
 }
 
-// Choose row break points minimising Σ(rowHeight − targetH)².
-// Greedy row filling (add photos until overflow, then break) is what strands a
-// single photo on the last row. This considers every split, so it cannot.
-export function breakRows(aspects, contentW, gutterIn, targetH, pinned = []) {
-  const n = aspects.length;
-  if (n === 0) return [];
-
-  const best = new Array(n + 1).fill(Infinity);
-  const prev = new Array(n + 1).fill(0);
-  best[0] = 0;
-
-  for (let j = 1; j <= n; j++) {
-    for (let i = 1; i <= j; i++) {
-      if (best[i - 1] === Infinity) continue;
-
-      // A pinned photo takes a row alone, so any longer slice containing one
-      // is not a legal row.
-      const len = j - i + 1;
-      if (len > 1) {
-        let blocked = false;
-        for (let k = i - 1; k < j; k++) if (pinned[k]) { blocked = true; break; }
-        if (blocked) continue;
-      }
-
-      const h = rowHeight(aspects.slice(i - 1, j), contentW, gutterIn);
-      if (!(h > 0)) continue; // gutters exceed the content width
-
-      const cost = best[i - 1] + (h - targetH) ** 2;
-      if (cost < best[j]) {
-        best[j] = cost;
-        prev[j] = i - 1;
-      }
-    }
-  }
-
-  const rows = [];
-  let j = n;
-  while (j > 0) {
-    const i = prev[j];
-    rows.unshift([i, j]);
-    j = i;
-  }
-  return rows;
-}
-
 export function totalHeight(aspects, rows, contentW, gutterIn) {
   if (rows.length === 0) return 0;
   const sum = rows.reduce(
@@ -68,38 +23,86 @@ export function totalHeight(aspects, rows, contentW, gutterIn) {
   return sum + (rows.length - 1) * gutterIn;
 }
 
-// Total height rises monotonically with targetH: a small target favours many
-// photos per row (short rows, short page), a large target favours few.
-// So the target height that fills the sheet can be binary-searched.
+// Maximise page fill using only rows whose height falls inside a window
+// [lo, lo*ratioCap], sweeping the window across the plausible range.
 //
-// This is the step that adapts horizontal justification to a fixed sheet. Web
-// galleries scroll forever and only justify width, so they pick a target height
-// as a constant. A sheet has a hard bottom edge, so it is a solved variable.
-export function solveRows(aspects, contentW, contentH, gutterIn, pinned = []) {
-  if (aspects.length === 0) return { rows: [], heights: [] };
+// The superseded approach minimised each row's deviation from a target height
+// and binary-searched the target. That rewards rows of near-equal height, hence
+// near-equal photo counts, so reachable layouts collapse to "k photos per row"
+// and total height jumps geometrically — leaving the page height in a gap and
+// fill stuck at 40-76%. Capping the ratio instead of minimising the spread
+// reaches 85-96%.
+export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
+  const { pinned = [], ratioCap = 3, windowSteps = 160 } = opts;
+  const n = aspects.length;
+  if (n === 0) return { rows: [], heights: [] };
 
-  const measure = (t) => {
-    const rows = breakRows(aspects, contentW, gutterIn, t, pinned);
-    return { rows, total: totalHeight(aspects, rows, contentW, gutterIn) };
-  };
+  // A row's height is bounded below by putting every photo in one row, and
+  // above by the tallest single photo spanning the full width.
+  const allInOne = rowHeight(aspects, contentW, gutterIn);
+  const tallestSingle = Math.max(...aspects.map((a) => contentW / a));
+  const loMin = Math.max(1e-6, Math.min(allInOne, tallestSingle));
+  const loMax = Math.max(allInOne, tallestSingle, loMin);
 
-  let lo = 1e-3;
-  let hi = contentH;
-  let best = measure(lo);
+  // A single photo can be taller than the whole page (a 2:3 portrait spanning
+  // 8in is 12in tall). Clamping keeps it on the sheet; layout() centres any row
+  // that is consequently not flush.
+  const heightOf = (i, j) =>
+    Math.min(rowHeight(aspects.slice(i, j), contentW, gutterIn), contentH);
 
-  for (let k = 0; k < 40; k++) {
-    const mid = (lo + hi) / 2;
-    const m = measure(mid);
-    if (m.total > contentH) {
-      hi = mid;
-    } else {
-      lo = mid;
-      best = m;
+  let best = null;
+
+  for (let s = 0; s <= windowSteps; s++) {
+    const lo = loMin * Math.pow(loMax / loMin, s / windowSteps);
+    const hi = lo * ratioCap;
+
+    const dp = new Array(n + 1).fill(-Infinity);
+    const prev = new Array(n + 1).fill(-1);
+    dp[0] = 0;
+
+    for (let j = 1; j <= n; j++) {
+      for (let i = 0; i < j; i++) {
+        if (dp[i] === -Infinity) continue;
+
+        let hasPinned = false;
+        for (let k = i; k < j; k++) if (pinned[k]) { hasPinned = true; break; }
+        if (hasPinned && j - i > 1) continue;
+
+        const h = heightOf(i, j);
+        if (!(h > 0)) continue;
+        // A pinned row is exempt from the window: it spans the full width by
+        // definition, and constraining it would make pinning fail to solve.
+        if (!hasPinned && (h < lo * (1 - 1e-9) || h > hi * (1 + 1e-9))) continue;
+
+        const total = dp[i] + h + (i > 0 ? gutterIn : 0);
+        // The ceiling belongs here, not on the window's best total. A window
+        // that permits an overflowing layout usually permits an excellent
+        // fitting one too; rejecting the window wholesale loses it.
+        if (total > contentH + 1e-9) continue;
+
+        if (total > dp[j]) { dp[j] = total; prev[j] = i; }
+      }
     }
+
+    if (dp[n] === -Infinity) continue;
+
+    const rows = [];
+    for (let j = n; j > 0; j = prev[j]) rows.unshift([prev[j], j]);
+    const heights = rows.map(([a, b]) => heightOf(a, b));
+    const ratio = Math.max(...heights) / Math.min(...heights);
+
+    // Prefer fill; break near-ties within 1% of the page toward the tidier layout.
+    const better =
+      !best ||
+      dp[n] > best.total + contentH * 0.01 ||
+      (Math.abs(dp[n] - best.total) <= contentH * 0.01 && ratio < best.ratio);
+    if (better) best = { total: dp[n], rows, heights, ratio };
   }
 
-  const heights = best.rows.map(([s, e]) =>
-    rowHeight(aspects.slice(s, e), contentW, gutterIn),
-  );
-  return { rows: best.rows, heights };
+  if (best) return { rows: best.rows, heights: best.heights };
+
+  // No window admitted a fitting layout. Give each photo its own clamped row so
+  // callers still get a well-formed result; the density warning will fire.
+  const rows = aspects.map((_, i) => [i, i + 1]);
+  return { rows, heights: rows.map(([a, b]) => heightOf(a, b)) };
 }

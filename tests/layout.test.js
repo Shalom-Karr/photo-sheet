@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rowHeight, LETTER, breakRows, totalHeight } from '../src/layout.js';
+import { rowHeight, LETTER, totalHeight } from '../src/layout.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
 
@@ -29,41 +29,12 @@ test('LETTER defaults match the spec', () => {
   assert.equal(LETTER.minPhotoIn, 1.5);
 });
 
-test('rows cover every photo exactly once, in order', () => {
-  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1];
-  const rows = breakRows(aspects, 8, 0.08, 2.0);
-  assert.equal(rows[0][0], 0);
-  assert.equal(rows[rows.length - 1][1], aspects.length);
-  for (let i = 1; i < rows.length; i++) {
-    assert.equal(rows[i][0], rows[i - 1][1], 'rows must be contiguous');
-  }
-});
-
-test('a larger target height produces more rows', () => {
-  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1, 1.78];
-  const few = breakRows(aspects, 8, 0.08, 1.0);
-  const many = breakRows(aspects, 8, 0.08, 3.0);
-  assert.ok(many.length > few.length);
-});
-
-test('DP beats greedy on a set built to strand a runt final row', () => {
-  // Greedy fills until overflow and leaves one photo alone on the last row.
-  const aspects = [1.5, 1.5, 1.5, 1.5, 1.5];
-  const target = 2.0;
-  const rows = breakRows(aspects, 8, 0.08, target);
-  const heights = rows.map(([s, e]) => rowHeight(aspects.slice(s, e), 8, 0.08));
-  const worst = Math.max(...heights.map(h => Math.abs(h - target)));
-  // A stranded single photo would be ~5.3in tall, far from the 2in target.
-  assert.ok(worst < 2.0, `worst deviation ${worst} suggests a runt row`);
-});
-
 test('totalHeight sums rows plus the gutters between them', () => {
   const aspects = [1.5, 1.5, 1.5, 1.5];
-  const rows = breakRows(aspects, 8, 0.08, 2.0);
-  const expected =
-    rows.reduce((s, [a, b]) => s + rowHeight(aspects.slice(a, b), 8, 0.08), 0) +
-    (rows.length - 1) * 0.08;
-  assert.ok(Math.abs(totalHeight(aspects, rows, 8, 0.08) - expected) < 1e-9);
+  const rows = [[0, 2], [2, 4]];
+  // Each row: two 1.5-aspect photos across 8in with one 0.08 gutter.
+  // h = (8 - 0.08) / 3 = 2.64. Two rows plus one gutter between them.
+  assert.ok(Math.abs(totalHeight(aspects, rows, 8, 0.08) - (2.64 * 2 + 0.08)) < 1e-9);
 });
 
 import { solveRows } from '../src/layout.js';
@@ -71,38 +42,71 @@ import { solveRows } from '../src/layout.js';
 const CW = 8.0;   // 8.5 - 2*0.25
 const CH = 10.5;  // 11  - 2*0.25
 
-test('solved layout never exceeds the content height', () => {
+const fill = (r, contentH = CH) =>
+  (r.heights.reduce((a, b) => a + b, 0) + (r.rows.length - 1) * 0.08) / contentH;
+
+test('rows are contiguous and cover every photo once', () => {
+  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1];
+  const { rows } = solveRows(aspects, CW, CH, 0.08);
+  assert.equal(rows[0][0], 0);
+  assert.equal(rows[rows.length - 1][1], aspects.length);
+  for (let i = 1; i < rows.length; i++) assert.equal(rows[i][0], rows[i - 1][1]);
+});
+
+test('never overflows the content height', () => {
   const sets = [
     [1.5],
+    [0.67],
     [1.5, 1.78],
-    [1.5, 1.78, 1, 0.67, 1.33],
     Array.from({ length: 20 }, (_, i) => [1, 1.25, 1.33, 1.5, 1.78][i % 5]),
   ];
   for (const aspects of sets) {
-    const { rows, heights } = solveRows(aspects, CW, CH, 0.08, []);
-    const used = heights.reduce((a, b) => a + b, 0) + (rows.length - 1) * 0.08;
-    assert.ok(used <= CH + 1e-6, `used ${used} exceeds ${CH}`);
+    const r = solveRows(aspects, CW, CH, 0.08);
+    const used = r.heights.reduce((a, b) => a + b, 0) + (r.rows.length - 1) * 0.08;
+    assert.ok(used <= CH + 1e-6, `used ${used} for ${aspects.length} photos`);
   }
 });
 
-test('solved layout uses most of the page rather than a fraction of it', () => {
+test('fills the page far better than near-uniform rows did', () => {
+  // The superseded binary-search design scored 0.736 on this exact input.
   const aspects = Array.from({ length: 12 }, (_, i) => [1, 1.33, 1.5, 1.78][i % 4]);
-  const { rows, heights } = solveRows(aspects, CW, CH, 0.08, []);
-  const used = heights.reduce((a, b) => a + b, 0) + (rows.length - 1) * 0.08;
-  assert.ok(used > CH * 0.85, `only used ${used} of ${CH}`);
+  assert.ok(fill(solveRows(aspects, CW, CH, 0.08)) > 0.84);
 });
 
-test('every solved row is flush to the content width', () => {
-  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1];
-  const { rows, heights } = solveRows(aspects, CW, CH, 0.08, []);
-  rows.forEach(([s, e], r) => {
-    const w = aspects.slice(s, e).reduce((sum, a) => sum + a * heights[r], 0)
-      + (e - s - 1) * 0.08;
-    assert.ok(Math.abs(w - CW) < 1e-6, `row ${r} width ${w}, expected ${CW}`);
-  });
+test('ten identical landscapes fill the page', () => {
+  // Scored 0.470 under the superseded design.
+  assert.ok(fill(solveRows(Array(10).fill(1.5), CW, CH, 0.08)) > 0.85);
+});
+
+test('a lower ratio cap trades fill for evenness', () => {
+  const aspects = Array.from({ length: 12 }, (_, i) => [1, 1.33, 1.5, 1.78][i % 4]);
+  const loose = solveRows(aspects, CW, CH, 0.08, { ratioCap: 3 });
+  const tight = solveRows(aspects, CW, CH, 0.08, { ratioCap: 1.5 });
+  const spread = (r) => Math.max(...r.heights) / Math.min(...r.heights);
+  assert.ok(spread(tight) <= spread(loose) + 1e-9);
+  assert.ok(fill(tight) <= fill(loose) + 1e-9);
+});
+
+test('no row height exceeds the cap times the shortest, absent pinning', () => {
+  const aspects = Array.from({ length: 14 }, (_, i) => [1, 1.33, 1.5, 1.78, 0.67, 0.75][i % 6]);
+  const r = solveRows(aspects, CW, CH, 0.08, { ratioCap: 3 });
+  assert.ok(Math.max(...r.heights) / Math.min(...r.heights) <= 3 + 1e-6);
+});
+
+test('a single portrait is clamped to the page instead of overflowing', () => {
+  // 8 / 0.667 = 12in tall, taller than the 10.5in content height.
+  const r = solveRows([0.667], CW, CH, 0.08);
+  assert.equal(r.rows.length, 1);
+  assert.ok(r.heights[0] <= CH + 1e-9, `height ${r.heights[0]} exceeds page`);
+});
+
+test('a pinned photo takes a row alone even when that breaks the window', () => {
+  const aspects = [1.5, 1.78, 1, 1.33];
+  const pinned = [false, true, false, false];
+  const { rows } = solveRows(aspects, CW, CH, 0.08, { pinned });
+  assert.ok(rows.some(([s, e]) => s === 1 && e === 2), 'pinned photo must be alone');
 });
 
 test('empty input yields no rows', () => {
-  const { rows } = solveRows([], CW, CH, 0.08, []);
-  assert.equal(rows.length, 0);
+  assert.deepEqual(solveRows([], CW, CH, 0.08).rows, []);
 });
