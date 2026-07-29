@@ -4,6 +4,7 @@ import { attachIngest } from './photos.js';
 import { downloadPdf, printPdf } from './export-pdf.js';
 import { downloadPng } from './export-png.js';
 import { attachInteractions } from './interact.js';
+import { saveProject, listProjects, loadProject } from './project.js';
 
 export const state = {
   photos: [],
@@ -71,5 +72,59 @@ function exportHandler(label, fn) {
 document.getElementById('pdf').addEventListener('click', exportHandler('PDF export', downloadPdf));
 document.getElementById('png').addEventListener('click', exportHandler('PNG export', downloadPng));
 document.getElementById('print').addEventListener('click', exportHandler('Print', printPdf));
+
+const projList = document.getElementById('projList');
+
+// Sync slider positions and their displayed labels to the current state.page.
+// Called after loading a project so the next slider drag does not jump.
+function syncSliders(page) {
+  document.getElementById('crop').value = Math.round(page.cropTolerance * 100);
+  document.getElementById('cropVal').textContent = Math.round(page.cropTolerance * 100);
+  document.getElementById('gutter').value = Math.round(page.gutterIn * 100);
+  document.getElementById('gutVal').textContent = page.gutterIn.toFixed(2);
+  document.getElementById('minsize').value = Math.round(page.minPhotoIn * 10);
+  document.getElementById('minVal').textContent = page.minPhotoIn.toFixed(1);
+  document.getElementById('ratio').value = Math.round(page.ratioCap * 10);
+  document.getElementById('ratioVal').textContent = page.ratioCap.toFixed(1);
+}
+
+async function refreshProjects() {
+  const names = await listProjects();
+  projList.replaceChildren(
+    ...names.map((n) => {
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = n;
+      return o;
+    }),
+  );
+}
+
+document.getElementById('save').addEventListener('click', async () => {
+  const name = document.getElementById('projName').value.trim();
+  if (!name) return alert('Name the sheet first.');
+  try {
+    await saveProject(state, name);
+    await refreshProjects();
+  } catch (e) {
+    alert(`Save failed: ${e.message}`);
+  }
+});
+
+document.getElementById('load').addEventListener('click', async () => {
+  if (!projList.value) return;
+  try {
+    const loaded = await loadProject(projList.value);
+    state.photos.forEach((p) => URL.revokeObjectURL(p.url));
+    state.photos = loaded.photos;
+    state.page = loaded.page;
+    syncSliders(state.page);
+    rerender();
+  } catch (e) {
+    alert(`Load failed: ${e.message}`);
+  }
+});
+
+refreshProjects();
 
 rerender();
