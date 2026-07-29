@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photo Sheet</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="data:,">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <div class="flex h-screen">
+    <aside class="w-72 shrink-0 bg-slate-800 p-4 space-y-4 overflow-y-auto">
+      <h1 class="text-lg font-semibold">Photo Sheet</h1>
+
+      <div class="space-y-2">
+        <button id="pick" class="w-full rounded bg-sky-600 hover:bg-sky-500 px-3 py-2 text-sm">Add photos…</button>
+        <p class="text-xs text-slate-400">or paste with Ctrl+V, or drag files onto the sheet</p>
+      </div>
+
+      <label class="block text-sm">Crop tolerance: <span id="cropVal">6</span>%
+        <input id="crop" type="range" min="0" max="20" value="6" class="w-full">
+      </label>
+
+      <label class="block text-sm">Gutter: <span id="gutVal">0.08</span> in
+        <input id="gutter" type="range" min="0" max="50" value="8" class="w-full">
+      </label>
+
+      <label class="block text-sm">Min photo size: <span id="minVal">1.5</span> in
+        <input id="minsize" type="range" min="5" max="40" value="15" class="w-full">
+      </label>
+
+      <label class="block text-sm">Density vs evenness: <span id="ratioVal">3.0</span>&times;
+        <input id="ratio" type="range" min="10" max="50" value="30" class="w-full">
+      </label>
+
+      <div id="warnings" class="text-xs text-amber-300 space-y-1"></div>
+
+      <div class="space-y-2 pt-2">
+        <button id="pdf" class="w-full rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Export PDF</button>
+        <button id="png" class="w-full rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Export PNG</button>
+        <button id="print" class="w-full rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Print</button>
+      </div>
+
+      <p id="count" class="text-xs text-slate-400"></p>
+    </aside>
+
+    <main class="flex-1 grid place-items-center overflow-auto p-6">
+      <div id="sheet" class="relative bg-white shadow-2xl"></div>
+    </main>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
