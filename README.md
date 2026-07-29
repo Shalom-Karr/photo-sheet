@@ -60,20 +60,6 @@ path argument is resolved as a module and fails with `MODULE_NOT_FOUND`.
 - [ ] Save and reopen sheets
 - [ ] Final documentation
 
-## Known limitations
-
-- **Mixed portrait and landscape.** Within a row all photos share a height, so a
-  16:9 receives about 2.6× the area of a 2:3 portrait beside it. The fix is
-  column grouping — stacking two landscapes into a portrait-shaped block —
-  deferred until it proves necessary in practice.
-- **HEIC is not supported**, because Chrome cannot decode it. Convert to JPEG.
-- **Single sheet only.** Overflow raises a density warning rather than
-  paginating.
-
-## Licence
-
-Not yet determined.
-
 ## Page fill by photo count
 
 Fill is dominated by how many photos are on the sheet, not what order they are in:
@@ -87,3 +73,17 @@ Fill is dominated by how many photos are on the sheet, not what order they are i
 Five photos of mixed aspect ratio cannot fill a letter sheet under **any** ordering —
 the best of all 120 permutations reaches 64.5% ink coverage against 57.9% as-ordered.
 Six photos reach 97%. Reordering was measured and rejected as a feature on that basis.
+
+## Known limitations
+
+- **Mixed portrait and landscape.** Within a row all photos share a height, so a
+  16:9 receives about 2.6× the area of a 2:3 portrait beside it. The fix is
+  column grouping — stacking two landscapes into a portrait-shaped block —
+  deferred until it proves necessary in practice.
+- **HEIC is not supported**, because Chrome cannot decode it. Convert to JPEG.
+- **Single sheet only.** Overflow raises a density warning rather than
+  paginating.
+
+## Licence
+
+Not yet determined.
