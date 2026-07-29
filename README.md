@@ -4,9 +4,16 @@ Packs photos of mixed aspect ratios (1:1, 5:4, 4:3, 3:2, 16:9, and portrait
 variants) onto one printable sheet with minimal blank space, re-solving the whole
 page automatically as photos are added or removed.
 
-No build step, no framework, nothing to install. Serve the folder and open it.
+**Live:** <https://shalom-karr.github.io/photo-sheet/>
+
+No build step, no framework, nothing to install.
 
 ## Running
+
+Use the hosted copy: <https://shalom-karr.github.io/photo-sheet/>. Photos never
+leave your machine — everything runs in the browser.
+
+To run it locally instead:
 
 ```bash
 python -m http.server 8000
@@ -14,9 +21,9 @@ python -m http.server 8000
 
 Then open <http://localhost:8000>.
 
-**It must be served over HTTP.** Opening `index.html` directly as a `file://`
-URL will not work — Chrome blocks ES module loading across `file://`, and the
-page will look dead with only a console error to explain why.
+**It must be served over HTTP either way.** Opening `index.html` directly as a
+`file://` URL will not work — Chrome blocks ES module loading across `file://`,
+and the page will look dead with only a console error to explain why.
 
 ## Using it
 
@@ -26,6 +33,8 @@ page will look dead with only a console error to explain why.
 | Reorder | Drag one photo onto another |
 | Pin (own row, full width) | Double click |
 | Nudge the crop window | `Shift` + scroll |
+| Resize one photo | Drag any edge or the corner handle. The rest reflow around it |
+| Release a resize | Double click the same handle |
 | Remove | Right click |
 | Save / reopen a sheet | Name it, **Save sheet**, then pick it from the list |
 
@@ -115,6 +124,42 @@ that basis and rejected: it buys about one point at six photos or more.
 
 If a sheet looks half empty, the remedy is another photo, more crop tolerance, or
 accepting the whitespace.
+
+### Resizing one photo
+
+Drag any edge of a photo, or its corner, and that photo becomes exactly the size
+you drag it to. Handles fade in on hover and turn emerald while a photo is sized
+by hand, so the state is visible rather than hidden.
+
+Width and height are one control, not two: an uncropped photo's proportions are
+fixed, so dragging a side edge and dragging the bottom edge set the same
+underlying size. Dragging any edge *away* from the photo's centre makes it bigger.
+
+**Growing a photo pushes its rowmates onto other rows rather than cropping them.**
+Measured, dragging one photo of a six-photo sheet wider:
+
+| target width | photos sharing its row |
+|---|---|
+| 2.5 in | 3 |
+| 3.5 in | 2 |
+| 6.0 in | 1 |
+
+Your photo resizes smoothly, but neighbours jump between rows in steps — a photo
+is either in a row or it isn't, and nothing can smooth that. It is the price of
+reflowing instead of cropping.
+
+Above roughly 3 inches a photo is close to the full page width and ends up alone
+on its row, so there will be white space beside it. That is what asking for a big
+photo means.
+
+Sizing survives saving and reopening a sheet.
+
+### When a sheet cannot fit
+
+Some combinations genuinely do not fit — pinning a photo forces it onto a row by
+itself, which can leave too little room for the rest. Rather than running off the
+page, every row is scaled down to fit and the sheet says so. Unpinning usually
+recovers the space.
 
 ## Printing
 
