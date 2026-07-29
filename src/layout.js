@@ -67,3 +67,39 @@ export function totalHeight(aspects, rows, contentW, gutterIn) {
   );
   return sum + (rows.length - 1) * gutterIn;
 }
+
+// Total height rises monotonically with targetH: a small target favours many
+// photos per row (short rows, short page), a large target favours few.
+// So the target height that fills the sheet can be binary-searched.
+//
+// This is the step that adapts horizontal justification to a fixed sheet. Web
+// galleries scroll forever and only justify width, so they pick a target height
+// as a constant. A sheet has a hard bottom edge, so it is a solved variable.
+export function solveRows(aspects, contentW, contentH, gutterIn, pinned = []) {
+  if (aspects.length === 0) return { rows: [], heights: [] };
+
+  const measure = (t) => {
+    const rows = breakRows(aspects, contentW, gutterIn, t, pinned);
+    return { rows, total: totalHeight(aspects, rows, contentW, gutterIn) };
+  };
+
+  let lo = 1e-3;
+  let hi = contentH;
+  let best = measure(lo);
+
+  for (let k = 0; k < 40; k++) {
+    const mid = (lo + hi) / 2;
+    const m = measure(mid);
+    if (m.total > contentH) {
+      hi = mid;
+    } else {
+      lo = mid;
+      best = m;
+    }
+  }
+
+  const heights = best.rows.map(([s, e]) =>
+    rowHeight(aspects.slice(s, e), contentW, gutterIn),
+  );
+  return { rows: best.rows, heights };
+}

@@ -65,3 +65,44 @@ test('totalHeight sums rows plus the gutters between them', () => {
     (rows.length - 1) * 0.08;
   assert.ok(Math.abs(totalHeight(aspects, rows, 8, 0.08) - expected) < 1e-9);
 });
+
+import { solveRows } from '../src/layout.js';
+
+const CW = 8.0;   // 8.5 - 2*0.25
+const CH = 10.5;  // 11  - 2*0.25
+
+test('solved layout never exceeds the content height', () => {
+  const sets = [
+    [1.5],
+    [1.5, 1.78],
+    [1.5, 1.78, 1, 0.67, 1.33],
+    Array.from({ length: 20 }, (_, i) => [1, 1.25, 1.33, 1.5, 1.78][i % 5]),
+  ];
+  for (const aspects of sets) {
+    const { rows, heights } = solveRows(aspects, CW, CH, 0.08, []);
+    const used = heights.reduce((a, b) => a + b, 0) + (rows.length - 1) * 0.08;
+    assert.ok(used <= CH + 1e-6, `used ${used} exceeds ${CH}`);
+  }
+});
+
+test('solved layout uses most of the page rather than a fraction of it', () => {
+  const aspects = Array.from({ length: 12 }, (_, i) => [1, 1.33, 1.5, 1.78][i % 4]);
+  const { rows, heights } = solveRows(aspects, CW, CH, 0.08, []);
+  const used = heights.reduce((a, b) => a + b, 0) + (rows.length - 1) * 0.08;
+  assert.ok(used > CH * 0.85, `only used ${used} of ${CH}`);
+});
+
+test('every solved row is flush to the content width', () => {
+  const aspects = [1.5, 1.78, 1, 0.67, 1.33, 1.5, 1];
+  const { rows, heights } = solveRows(aspects, CW, CH, 0.08, []);
+  rows.forEach(([s, e], r) => {
+    const w = aspects.slice(s, e).reduce((sum, a) => sum + a * heights[r], 0)
+      + (e - s - 1) * 0.08;
+    assert.ok(Math.abs(w - CW) < 1e-6, `row ${r} width ${w}, expected ${CW}`);
+  });
+});
+
+test('empty input yields no rows', () => {
+  const { rows } = solveRows([], CW, CH, 0.08, []);
+  assert.equal(rows.length, 0);
+});
