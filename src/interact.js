@@ -88,6 +88,7 @@ export function attachInteractions(container, state, rerender, currentScale) {
       queued = false;
       if (pending == null) return;
       photo.targetHeightIn = pending;
+      state.manual = true;
       rerender();
     };
 

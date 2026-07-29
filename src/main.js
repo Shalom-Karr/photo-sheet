@@ -9,7 +9,16 @@ import { saveProject, listProjects, loadProject } from './project.js';
 export const state = {
   photos: [],
   page: { ...LETTER },
+  manual: false,
 };
+
+// Exported so every layout() call site shares one definition of what the
+// toggle means. Suspending rather than clearing keeps the user's size.
+export function photosForLayout() {
+  if (state.manual) return state.photos;
+  return state.photos.map((p) =>
+    p.targetHeightIn == null ? p : { ...p, targetHeightIn: null });
+}
 
 const sheet = document.getElementById('sheet');
 const warningsEl = document.getElementById('warnings');
@@ -18,7 +27,8 @@ const countEl = document.getElementById('count');
 let previewScale = 1;
 
 export function rerender() {
-  const { placements, warnings } = layout(state.photos, state.page);
+  const { placements, warnings } = layout(photosForLayout(), state.page);
+  document.getElementById('manual').checked = state.manual;
 
   // Fit the sheet to the viewport without changing any inch-space value.
   const avail = sheet.parentElement.clientHeight - 48;
@@ -50,7 +60,13 @@ function bindSlider(id, labelId, toValue, key, fmt) {
 bindSlider('crop', 'cropVal', (v) => v / 100, 'cropTolerance', (v) => Math.round(v * 100));
 bindSlider('gutter', 'gutVal', (v) => v / 100, 'gutterIn', (v) => v.toFixed(2));
 bindSlider('minsize', 'minVal', (v) => v / 10, 'minPhotoIn', (v) => v.toFixed(1));
+bindSlider('maxsize', 'maxVal', (v) => v / 10, 'maxPhotoIn', (v) => v.toFixed(1));
 bindSlider('ratio', 'ratioVal', (v) => v / 10, 'ratioCap', (v) => v.toFixed(1));
+
+document.getElementById('manual').addEventListener('change', (e) => {
+  state.manual = e.target.checked;
+  rerender();
+});
 
 attachInteractions(sheet, state, rerender, () => previewScale);
 
@@ -63,7 +79,7 @@ attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected
 function exportHandler(label, fn) {
   return async () => {
     try {
-      const { placements } = layout(state.photos, state.page);
+      const { placements } = layout(photosForLayout(), state.page);
       await fn(state.photos, placements, state.page);
     } catch (e) {
       console.error(e);
@@ -87,6 +103,8 @@ function syncSliders(page) {
   document.getElementById('gutVal').textContent = page.gutterIn.toFixed(2);
   document.getElementById('minsize').value = Math.round(page.minPhotoIn * 10);
   document.getElementById('minVal').textContent = page.minPhotoIn.toFixed(1);
+  document.getElementById('maxsize').value = Math.round(page.maxPhotoIn * 10);
+  document.getElementById('maxVal').textContent = page.maxPhotoIn.toFixed(1);
   document.getElementById('ratio').value = Math.round(page.ratioCap * 10);
   document.getElementById('ratioVal').textContent = page.ratioCap.toFixed(1);
 }
@@ -125,6 +143,7 @@ document.getElementById('load').addEventListener('click', async () => {
     state.photos.forEach((p) => URL.revokeObjectURL(p.url));
     state.photos = loaded.photos;
     state.page = loaded.page;
+    state.manual = loaded.manual;
     rerender();
   } catch (e) {
     alert(`Load failed: ${e.message}`);

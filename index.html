@@ -29,8 +29,17 @@
         <input id="minsize" type="range" min="5" max="40" value="15" class="w-full">
       </label>
 
+      <label class="block text-sm">Max photo size: <span id="maxVal">11.0</span> in
+        <input id="maxsize" type="range" min="20" max="110" value="110" class="w-full">
+      </label>
+
       <label class="block text-sm">Density vs evenness: <span id="ratioVal">3.0</span>&times;
         <input id="ratio" type="range" min="10" max="50" value="30" class="w-full">
+      </label>
+
+      <label class="flex items-center gap-2 text-sm">
+        <input id="manual" type="checkbox" class="accent-sky-500">
+        Manual sizing
       </label>
 
       <div id="warnings" class="text-xs text-amber-300 space-y-1"></div>

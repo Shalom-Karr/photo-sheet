@@ -6,6 +6,7 @@ export const LETTER = {
   cropTolerance: 0.06,
   minPhotoIn: 1.5,
   ratioCap: 3,
+  maxPhotoIn: 11,
 };
 
 // Photos in a row share height h. Their widths plus gutters must equal contentW:
@@ -25,7 +26,7 @@ export function rowHeight(aspects, contentW, gutterIn) {
 // fill stuck at 40-76%. Capping the ratio instead of minimising the spread
 // reaches 85-96%.
 export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
-  const { pinned = [], ratioCap = 3, windowSteps = 160 } = opts;
+  const { pinned = [], ratioCap = 3, windowSteps = 160, maxPhotoIn = Infinity } = opts;
   const n = aspects.length;
   if (n === 0) return { rows: [], heights: [] };
 
@@ -43,9 +44,14 @@ export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
 
   // A single photo can be taller than the whole page (a 2:3 portrait spanning
   // 8in is 12in tall). Clamping keeps it on the sheet; layout() centres any row
-  // that is consequently not flush.
-  const heightOf = (i, j) =>
-    Math.min(rowHeight(aspects.slice(i, j), contentW, gutterIn), contentH);
+  // that is consequently not flush. maxPhotoIn caps the largest rendered
+  // dimension: for a row of height h the largest dimension is h × max(1,
+  // largestAspect), so the cap translates to an upper bound on h.
+  const heightOf = (i, j) => {
+    const slice = aspects.slice(i, j);
+    const largestAspect = Math.max(1, ...slice);
+    return Math.min(rowHeight(slice, contentW, gutterIn), contentH, maxPhotoIn / largestAspect);
+  };
 
   let best = null;
 
@@ -107,7 +113,11 @@ export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
 // Growing a row from h to h*scale keeps its width fixed, so each photo's source
 // is trimmed left and right by 1 − 1/scale. Distributing the residual in
 // proportion to row height makes that fraction identical on every row.
-export function absorbResidual(heights, gutterIn, contentH, cropTolerance) {
+//
+// maxScaleFactor is an optional external ceiling on the scale (e.g. derived from
+// the maxPhotoIn constraint). When it binds, the part of the residual that the
+// capped scale cannot absorb becomes extra gutter instead.
+export function absorbResidual(heights, gutterIn, contentH, cropTolerance, maxScaleFactor = Infinity) {
   const n = heights.length;
   if (n === 0) return { heights: [], cropFraction: 0, extraGutter: 0 };
 
@@ -133,7 +143,15 @@ export function absorbResidual(heights, gutterIn, contentH, cropTolerance) {
     }
   }
 
-  const scale = (sumH + absorbed) / sumH;
+  let scale = (sumH + absorbed) / sumH;
+  // Apply external scale ceiling. When it binds, re-derive absorbed and
+  // cropFraction from the capped scale so they remain consistent.
+  if (scale > maxScaleFactor) {
+    scale = maxScaleFactor;
+    absorbed = sumH * (scale - 1);
+    cropFraction = scale > 1 ? 1 - 1 / scale : 0;
+  }
+
   // Whitespace the crop cap could not absorb is spread across every gap —
   // above, between and below — so it reads as margin rather than a bottom band.
   const extraGutter = (residual - absorbed) / (n + 1);
@@ -196,12 +214,19 @@ export function layout(photos, page) {
   const { rows, heights: solvedH } = solveRows(aspects, contentW, contentH, page.gutterIn, {
     pinned,
     ratioCap: page.ratioCap,
+    maxPhotoIn: page.maxPhotoIn,
   });
   // A no-op unless the page would actually overflow, which needs an infeasible
   // sheet — in practice a pinned photo that is not the first.
   const fit = fitToPage(solvedH, page.gutterIn, contentH);
   const heights = fit.heights;
-  const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
+  // Keep rendered heights within maxPhotoIn. heightOf already caps
+  // pre-absorption heights; absorbResidual would otherwise scale them up past
+  // the limit. Scale cap = maxPhotoIn / tallest pre-absorption row height.
+  const maxScaleFactor = page.maxPhotoIn != null
+    ? Math.min(...heights.map((h) => h > 0 ? page.maxPhotoIn / h : Infinity))
+    : Infinity;
+  const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance, maxScaleFactor);
 
   // Visible slice of each source after the uniform horizontal trim.
   const visW = 1 - abs.cropFraction;
@@ -264,10 +289,12 @@ function densityWarnings(placements, page) {
 }
 
 // A photo's size is its row's height, and a row cannot be wider than the page.
-// So a target is bounded above by both the width limit and the page height.
-export function clampTarget(target, aspect, contentW, contentH, minPhotoIn) {
+// So a target is bounded above by the width limit, the page height, and the max
+// photo size: at height h the photo's larger dimension is h × max(1, aspect).
+export function clampTarget(target, aspect, contentW, contentH, minPhotoIn, maxPhotoIn = Infinity) {
   const widthLimit = contentW / aspect;
-  const hi = Math.min(widthLimit, contentH);
+  const maxFromSize = maxPhotoIn / Math.max(1, aspect);
+  const hi = Math.min(widthLimit, contentH, maxFromSize);
   const lo = Math.min(minPhotoIn, hi);
   // NaN would propagate through every downstream multiplication and yield a
   // sheet of NaN boxes. The drag handler derives the target by dividing by a
@@ -331,6 +358,7 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     contentW,
     contentH,
     page.minPhotoIn,
+    page.maxPhotoIn,
   );
 
   // Every other photo still has to land on the page, so the anchored row cannot
@@ -366,6 +394,15 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     5,
     photos.map((p) => !!p.pinned),
   );
+
+  // After companions are known, enforce the max-size cap against the largest
+  // aspect actually in the row. clampTarget only knew the anchor's own aspect;
+  // a wide companion could push the row's largest dimension past the cap.
+  if (page.maxPhotoIn != null) {
+    const largestAspectInRow = Math.max(1, ...row.indices.map((i) => aspects[i]));
+    target = Math.min(target, page.maxPhotoIn / largestAspectInRow);
+  }
+
   const inRow = new Set(row.indices);
 
   // Everything else keeps its relative order.
@@ -384,6 +421,7 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     ? solveRows(restAspects, contentW, budget, page.gutterIn, {
         pinned: restPinned,
         ratioCap: page.ratioCap,
+        maxPhotoIn: page.maxPhotoIn,
       })
     : { rows: [], heights: [] };
 
@@ -415,7 +453,13 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     contentH,
   );
   const heights = fit.heights;
-  const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance);
+  // Anchored rows use heights[ri] directly (not abs.heights), so they are
+  // already capped. Cap the absorption scale using all row heights so
+  // non-anchored abs.heights also stay within maxPhotoIn.
+  const maxScaleFactor = page.maxPhotoIn != null
+    ? Math.min(...heights.map((h) => h > 0 ? page.maxPhotoIn / h : Infinity))
+    : Infinity;
+  const abs = absorbResidual(heights, page.gutterIn, contentH, page.cropTolerance, maxScaleFactor);
   // The anchored row keeps the height it asked for; only ordinary rows absorb.
   const finalH = rowsOut.map((r, i) => (r.anchored ? heights[i] : abs.heights[i]));
 

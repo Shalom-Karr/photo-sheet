@@ -39,6 +39,7 @@ export async function saveProject(state, name) {
   const manifest = {
     version: 1,
     page: state.page,
+    manual: state.manual,
     photos: state.photos.map((p) => ({
       id: p.id,
       file: `${p.id}.bin`,
@@ -92,5 +93,6 @@ export async function loadProject(name) {
     // unrotated rather than undefined.
     photos.push({ orientation: 1, targetHeightIn: null, ...meta, blob, url: URL.createObjectURL(blob) });
   }
-  return { page: manifest.page, photos };
+  // Spread defaults first so old saved sheets missing newer fields get them.
+  return { page: { maxPhotoIn: 11, ...manifest.page }, photos, manual: manifest.manual ?? false };
 }

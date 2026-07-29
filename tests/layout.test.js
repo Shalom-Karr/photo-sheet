@@ -28,6 +28,7 @@ test('LETTER defaults match the spec', () => {
   assert.equal(LETTER.cropTolerance, 0.06);
   assert.equal(LETTER.minPhotoIn, 1.5);
   assert.equal(LETTER.ratioCap, 3);
+  assert.equal(LETTER.maxPhotoIn, 11);
 });
 
 import { solveRows } from '../src/layout.js';
@@ -435,4 +436,31 @@ test('clearing an anchor restores the original layout', () => {
   const cleared = mk();
   cleared[1].targetHeightIn = null;
   assert.deepEqual(layout(cleared, LETTER), before);
+});
+
+test('maxPhotoIn caps every photo, including pinned', () => {
+  const page = { ...LETTER, maxPhotoIn: 3 };
+  const photos = [1.5, 1.78, 1, 0.67, 1.33, 1.5].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  photos[2].pinned = true;
+  const { placements } = layout(photos, page);
+  for (const p of placements) {
+    assert.ok(Math.max(p.wIn, p.hIn) <= 3 + 1e-6,
+      `${p.photoId} is ${Math.max(p.wIn, p.hIn).toFixed(3)}in, over the 3in cap`);
+  }
+});
+
+test('maxPhotoIn caps a hand-dragged size too', () => {
+  const page = { ...LETTER, maxPhotoIn: 3 };
+  const photos = [1.5, 1.78, 1].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  photos[0].targetHeightIn = 9;
+  const { placements } = layout(photos, page);
+  for (const p of placements) {
+    assert.ok(Math.max(p.wIn, p.hIn) <= 3 + 1e-6);
+  }
+});
+
+test('the default maximum never binds', () => {
+  const mk = () => [1, 1.33, 1.5, 1.78, 0.67, 0.75, 1.5, 1]
+    .map((a, i) => ({ id: `p${i}`, aspect: a }));
+  assert.deepEqual(layout(mk(), LETTER), layout(mk(), { ...LETTER, maxPhotoIn: 999 }));
 });
