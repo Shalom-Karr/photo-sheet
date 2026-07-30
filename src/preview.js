@@ -22,7 +22,7 @@ export function renderPreview(container, photos, placements, page, scale = 1, se
     const isPinned = !!byId.get(pl.photoId)?.pinned;
     box.classList.add('cursor-move');
     if (isSelected) {
-      box.classList.add('ring-2', 'ring-white');
+      box.classList.add('ring-4', 'ring-fuchsia-500');
     } else if (isPinned) {
       box.classList.add('ring-0', 'hover:ring-2', 'ring-sky-400', 'ring-2', 'ring-amber-400');
     } else {
