@@ -35,7 +35,10 @@ and the page will look dead with only a console error to explain why.
 | Nudge the crop window | `Shift` + scroll |
 | Resize one photo | Drag any edge or the corner handle. The rest reflow around it |
 | Release a resize | Double click the same handle |
-| Remove | Right click |
+| Select a photo | Click it — a fuchsia ring marks it |
+| Delete the selected photo | `Backspace` or `Delete`. Deleting advances the selection, so you can keep pressing |
+| Clear the selection | `Escape`, or click the empty sheet |
+| Remove without selecting | Right click |
 | Save / reopen a sheet | Name it, **Save sheet**, then pick it from the list |
 
 Four sliders control the layout:
