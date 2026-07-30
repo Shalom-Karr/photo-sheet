@@ -63,6 +63,26 @@ bindSlider('minsize', 'minVal', (v) => v / 10, 'minPhotoIn', (v) => v.toFixed(1)
 bindSlider('maxsize', 'maxVal', (v) => v / 10, 'maxPhotoIn', (v) => v.toFixed(1));
 bindSlider('ratio', 'ratioVal', (v) => v / 10, 'ratioCap', (v) => v.toFixed(1));
 
+function perRowLabel(min, max) {
+  if (min <= 1 && max === 0) return 'any';
+  if (max === 0) return `${min}+`;
+  if (min === max) return String(min);
+  return `${min}–${max}`;
+}
+
+function updatePerRow() {
+  const minRaw = Math.max(1, Math.min(8, parseInt(document.getElementById('minPerRow').value) || 1));
+  const maxRaw = Math.max(0, Math.min(8, parseInt(document.getElementById('maxPerRow').value) || 0));
+  const inverted = maxRaw > 0 && minRaw > maxRaw;
+  state.page.minPerRow = inverted ? 1 : minRaw;
+  state.page.maxPerRow = inverted ? 0 : maxRaw;
+  document.getElementById('perRowVal').textContent = perRowLabel(state.page.minPerRow, state.page.maxPerRow);
+  rerender();
+}
+
+document.getElementById('minPerRow').addEventListener('input', updatePerRow);
+document.getElementById('maxPerRow').addEventListener('input', updatePerRow);
+
 document.getElementById('manual').addEventListener('change', (e) => {
   state.manual = e.target.checked;
   rerender();
@@ -107,6 +127,11 @@ function syncSliders(page) {
   document.getElementById('maxVal').textContent = page.maxPhotoIn.toFixed(1);
   document.getElementById('ratio').value = Math.round(page.ratioCap * 10);
   document.getElementById('ratioVal').textContent = page.ratioCap.toFixed(1);
+  const min = page.minPerRow ?? 1;
+  const max = page.maxPerRow ?? 0;
+  document.getElementById('minPerRow').value = min;
+  document.getElementById('maxPerRow').value = max;
+  document.getElementById('perRowVal').textContent = perRowLabel(min, max);
 }
 
 async function refreshProjects() {

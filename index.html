@@ -33,6 +33,15 @@
         <input id="maxsize" type="range" min="20" max="110" value="110" class="w-full">
       </label>
 
+      <label class="block text-sm">Photos per row: <span id="perRowVal">any</span>
+        <span class="flex gap-2 mt-1">
+          <input id="minPerRow" type="number" min="1" max="8" value="1"
+                 class="w-full rounded bg-slate-700 px-2 py-1 text-sm" aria-label="Minimum per row">
+          <input id="maxPerRow" type="number" min="0" max="8" value="0"
+                 class="w-full rounded bg-slate-700 px-2 py-1 text-sm" aria-label="Maximum per row">
+        </span>
+      </label>
+
       <label class="block text-sm">Density vs evenness: <span id="ratioVal">3.0</span>&times;
         <input id="ratio" type="range" min="10" max="50" value="30" class="w-full">
       </label>

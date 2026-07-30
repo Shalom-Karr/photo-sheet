@@ -464,3 +464,60 @@ test('the default maximum never binds', () => {
     .map((a, i) => ({ id: `p${i}`, aspect: a }));
   assert.deepEqual(layout(mk(), LETTER), layout(mk(), { ...LETTER, maxPhotoIn: 999 }));
 });
+
+test('per-row limits are off by default', () => {
+  assert.equal(LETTER.minPerRow, 1);
+  assert.equal(LETTER.maxPerRow, 0);
+  const mk = () => [1, 1.33, 1.5, 1.78, 1, 1.33, 1.5, 1.78]
+    .map((a, i) => ({ id: `p${i}`, aspect: a }));
+  assert.deepEqual(layout(mk(), LETTER), layout(mk(), { ...LETTER, minPerRow: 1, maxPerRow: 0 }));
+});
+
+test('maxPerRow is respected', () => {
+  const page = { ...LETTER, minPerRow: 1, maxPerRow: 3 };
+  const photos = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, aspect: [1, 1.33, 1.5, 1.78][i % 4] }));
+  const { placements } = layout(photos, page);
+  const rows = new Map();
+  for (const p of placements) {
+    const k = p.yIn.toFixed(4);
+    rows.set(k, (rows.get(k) ?? 0) + 1);
+  }
+  for (const [, count] of rows) assert.ok(count <= 3, `a row had ${count} photos`);
+});
+
+test('minPerRow is respected where feasible', () => {
+  const page = { ...LETTER, minPerRow: 3, maxPerRow: 4 };
+  const photos = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, aspect: [1, 1.33, 1.5, 1.78][i % 4] }));
+  const { placements, warnings } = layout(photos, page);
+  const rows = new Map();
+  for (const p of placements) {
+    const k = p.yIn.toFixed(4);
+    rows.set(k, (rows.get(k) ?? 0) + 1);
+  }
+  for (const [, count] of rows) assert.ok(count >= 3 && count <= 4, `a row had ${count} photos`);
+  assert.ok(!warnings.some((w) => w.code === 'perRow'), '12 photos should be feasible at 3-4');
+});
+
+test('an impossible per-row range relaxes instead of overflowing', () => {
+  // 5 photos cannot be split into rows of 3 or 4: no k satisfies 3k <= 5 <= 4k.
+  const page = { ...LETTER, minPerRow: 3, maxPerRow: 4 };
+  const photos = [1.5, 1.78, 1, 0.67, 1.33].map((a, i) => ({ id: `p${i}`, aspect: a }));
+  const { placements, warnings } = layout(photos, page);
+  assert.equal(placements.length, 5);
+  const bottom = Math.max(...placements.map((p) => p.yIn + p.hIn));
+  assert.ok(bottom <= LETTER.heightIn - LETTER.marginIn + 1e-6,
+    `reached ${bottom.toFixed(2)}in`);
+  assert.ok(warnings.length > 0, 'should say something about the relaxation');
+});
+
+test('a pinned photo still gets a solo row under a per-row minimum', () => {
+  const page = { ...LETTER, minPerRow: 3, maxPerRow: 4 };
+  const photos = Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, aspect: [1, 1.33, 1.5][i % 3] }));
+  photos[4].pinned = true;
+  const { placements } = layout(photos, page);
+  const pin = placements.find((p) => p.photoId === 'p4');
+  const sameRow = placements.filter((p) => Math.abs(p.yIn - pin.yIn) < 1e-6);
+  assert.equal(sameRow.length, 1, 'pinned photo must be alone');
+  const bottom = Math.max(...placements.map((p) => p.yIn + p.hIn));
+  assert.ok(bottom <= LETTER.heightIn - LETTER.marginIn + 1e-6);
+});

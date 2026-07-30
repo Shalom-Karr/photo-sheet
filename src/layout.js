@@ -7,6 +7,8 @@ export const LETTER = {
   minPhotoIn: 1.5,
   ratioCap: 3,
   maxPhotoIn: 11,
+  minPerRow: 1,
+  maxPerRow: 0,
 };
 
 // Photos in a row share height h. Their widths plus gutters must equal contentW:
@@ -26,7 +28,7 @@ export function rowHeight(aspects, contentW, gutterIn) {
 // fill stuck at 40-76%. Capping the ratio instead of minimising the spread
 // reaches 85-96%.
 export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
-  const { pinned = [], ratioCap = 3, windowSteps = 160, maxPhotoIn = Infinity } = opts;
+  const { pinned = [], ratioCap = 3, windowSteps = 160, maxPhotoIn = Infinity, minPerRow = 1, maxPerRow = 0, relaxMinForLast = false } = opts;
   const n = aspects.length;
   if (n === 0) return { rows: [], heights: [] };
 
@@ -71,6 +73,15 @@ export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
         for (let k = i; k < j; k++) if (pinned[k]) { hasPinned = true; break; }
         if (hasPinned && j - i > 1) continue;
 
+        // Per-row count constraints. Pinned rows are exempt (forced to size 1
+        // above — an explicit instruction beats a default).
+        if (!hasPinned) {
+          const count = j - i;
+          const isLast = j === n;
+          if (!(relaxMinForLast && isLast) && count < minPerRow) continue;
+          if (maxPerRow > 0 && count > maxPerRow) continue;
+        }
+
         const h = heightOf(i, j);
         if (!(h > 0)) continue;
         // A pinned row is exempt from the window: it spans the full width by
@@ -102,12 +113,12 @@ export function solveRows(aspects, contentW, contentH, gutterIn, opts = {}) {
     if (better) best = { total: dp[n], rows, heights, ratio };
   }
 
-  if (best) return { rows: best.rows, heights: best.heights };
+  if (best) return { rows: best.rows, heights: best.heights, feasible: true };
 
   // No window admitted a fitting layout. Give each photo its own clamped row so
   // callers still get a well-formed result; the density warning will fire.
   const rows = aspects.map((_, i) => [i, i + 1]);
-  return { rows, heights: rows.map(([a, b]) => heightOf(a, b)) };
+  return { rows, heights: rows.map(([a, b]) => heightOf(a, b)), feasible: false };
 }
 
 // Growing a row from h to h*scale keeps its width fixed, so each photo's source
@@ -191,6 +202,11 @@ const OVERFLOW_WARNING = {
     'to fit. Unpinning a photo usually recovers the space.',
 };
 
+const PERROW_WARNING = {
+  code: 'perRow',
+  message: 'Cannot fit these photos into rows of that size, so the limit was ignored.',
+};
+
 export function layout(photos, page) {
   if (photos.length === 0) return { placements: [], warnings: [] };
 
@@ -211,11 +227,37 @@ export function layout(photos, page) {
   const aspects = photos.map((p) => p.aspect);
   const pinned = photos.map((p) => !!p.pinned);
 
-  const { rows, heights: solvedH } = solveRows(aspects, contentW, contentH, page.gutterIn, {
+  const minPerRow = page.minPerRow ?? 1;
+  const maxPerRow = page.maxPerRow ?? 0;
+  const inverted = maxPerRow > 0 && minPerRow > maxPerRow;
+  const effectiveMin = inverted ? 1 : minPerRow;
+  const effectiveMax = inverted ? 0 : maxPerRow;
+  const hasConstraint = effectiveMin > 1 || effectiveMax > 0;
+
+  const perRowOpts = {
     pinned,
     ratioCap: page.ratioCap,
     maxPhotoIn: page.maxPhotoIn,
-  });
+    minPerRow: effectiveMin,
+    maxPerRow: effectiveMax,
+  };
+
+  let solved = solveRows(aspects, contentW, contentH, page.gutterIn, perRowOpts);
+  let perRowWarning = null;
+
+  if (!solved.feasible && hasConstraint) {
+    // Step 1: allow the final row to fall below minPerRow.
+    const s2 = solveRows(aspects, contentW, contentH, page.gutterIn, { ...perRowOpts, relaxMinForLast: true });
+    if (s2.feasible) {
+      solved = s2;
+    } else {
+      // Step 2: drop the per-row constraint entirely.
+      solved = solveRows(aspects, contentW, contentH, page.gutterIn, { pinned, ratioCap: page.ratioCap, maxPhotoIn: page.maxPhotoIn });
+    }
+    perRowWarning = { ...PERROW_WARNING };
+  }
+
+  const { rows, heights: solvedH } = solved;
   // A no-op unless the page would actually overflow, which needs an infeasible
   // sheet — in practice a pinned photo that is not the first.
   const fit = fitToPage(solvedH, page.gutterIn, contentH);
@@ -263,14 +305,15 @@ export function layout(photos, page) {
     y += rowH + page.gutterIn + abs.extraGutter;
   });
 
-  return { placements, warnings: warningsFor(placements, page, fit.scaled) };
+  return { placements, warnings: warningsFor(placements, page, fit.scaled, perRowWarning) };
 }
 
 // The overflow explanation comes first: it is the reason the photos are small, so
 // it reads before the density warning that scaling down usually also triggers.
-function warningsFor(placements, page, scaled) {
+function warningsFor(placements, page, scaled, perRowWarning = null) {
   const warnings = [];
   if (scaled) warnings.push({ ...OVERFLOW_WARNING });
+  if (perRowWarning) warnings.push({ ...perRowWarning });
   warnings.push(...densityWarnings(placements, page));
   return warnings;
 }
@@ -385,13 +428,14 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
   // that would silently override it. It stays in the rest, where solveRows still
   // gives it its own row. The anchor itself is exempt: an explicit size supersedes
   // "full content width" for the one photo being sized.
+  const anchorMaxK = Math.min(5, page.maxPerRow || 5);
   const row = anchoredRow(
     aspects,
     anchorIdx,
     target,
     contentW,
     page.gutterIn,
-    5,
+    anchorMaxK,
     photos.map((p) => !!p.pinned),
   );
 
@@ -417,13 +461,36 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
   // page — measured at 0.09in past the bottom margin for a portrait dragged to
   // full page height on an eight-photo sheet.
   const budget = contentH - target - page.gutterIn;
-  const solved = restIdx.length
-    ? solveRows(restAspects, contentW, budget, page.gutterIn, {
-        pinned: restPinned,
-        ratioCap: page.ratioCap,
-        maxPhotoIn: page.maxPhotoIn,
-      })
-    : { rows: [], heights: [] };
+  const aMinPerRow = page.minPerRow ?? 1;
+  const aMaxPerRow = page.maxPerRow ?? 0;
+  const aInverted = aMaxPerRow > 0 && aMinPerRow > aMaxPerRow;
+  const aEffMin = aInverted ? 1 : aMinPerRow;
+  const aEffMax = aInverted ? 0 : aMaxPerRow;
+  const aHasConstraint = aEffMin > 1 || aEffMax > 0;
+
+  const restBaseOpts = {
+    pinned: restPinned,
+    ratioCap: page.ratioCap,
+    maxPhotoIn: page.maxPhotoIn,
+    minPerRow: aEffMin,
+    maxPerRow: aEffMax,
+  };
+  let anchoredPerRowWarning = null;
+  let solved;
+  if (restIdx.length) {
+    solved = solveRows(restAspects, contentW, budget, page.gutterIn, restBaseOpts);
+    if (!solved.feasible && aHasConstraint) {
+      const s2 = solveRows(restAspects, contentW, budget, page.gutterIn, { ...restBaseOpts, relaxMinForLast: true });
+      if (s2.feasible) {
+        solved = s2;
+      } else {
+        solved = solveRows(restAspects, contentW, budget, page.gutterIn, { pinned: restPinned, ratioCap: page.ratioCap, maxPhotoIn: page.maxPhotoIn });
+      }
+      anchoredPerRowWarning = { ...PERROW_WARNING };
+    }
+  } else {
+    solved = { rows: [], heights: [] };
+  }
 
   const nRows = solved.rows.length;
   // Vertical position of the anchored row. Total fill is the same whichever
@@ -495,5 +562,5 @@ function layoutAnchored(photos, page, contentW, contentH, anchorIdx) {
     y += boxH + page.gutterIn + abs.extraGutter;
   });
 
-  return { placements, warnings: warningsFor(placements, page, fit.scaled) };
+  return { placements, warnings: warningsFor(placements, page, fit.scaled, anchoredPerRowWarning) };
 }
