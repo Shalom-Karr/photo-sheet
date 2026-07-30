@@ -5,6 +5,7 @@ import { downloadPdf, printPdf } from './export-pdf.js';
 import { downloadPng } from './export-png.js';
 import { attachInteractions } from './interact.js';
 import { saveProject, listProjects, loadProject } from './project.js';
+import { record, clear } from './history.js';
 
 export const state = {
   photos: [],
@@ -92,6 +93,7 @@ document.getElementById('manual').addEventListener('change', (e) => {
 attachInteractions(sheet, state, rerender, () => previewScale);
 
 attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected }) => {
+  record(state);
   state.photos.push(...photos);
   rerender();
   if (rejected.length) alert(rejected.join('\n'));
@@ -171,6 +173,7 @@ document.getElementById('load').addEventListener('click', async () => {
     state.page = loaded.page;
     state.manual = loaded.manual;
     state.selectedId = null;
+    clear();
     rerender();
   } catch (e) {
     alert(`Load failed: ${e.message}`);
