@@ -200,14 +200,17 @@ export function attachInteractions(container, state, rerender, currentScale) {
       return;
     }
     const ctrl = e.ctrlKey || e.metaKey;
-    if (ctrl && e.key === 'z' && !e.shiftKey) {
-      if (typing(e.target)) return;
+    if (!ctrl) return;
+    // key reports the produced character, which Caps Lock flips. Shift is read
+    // from the modifier, so the case tells us nothing and must be normalised.
+    const k = e.key.toLowerCase();
+    if (typing(e.target)) return;
+    if (k === 'z' && !e.shiftKey) {
       e.preventDefault();
       if (undo(state)) rerender();
       return;
     }
-    if (ctrl && (e.key === 'Z' || e.key === 'y')) {
-      if (typing(e.target)) return;
+    if ((k === 'z' && e.shiftKey) || k === 'y') {
       e.preventDefault();
       if (redo(state)) rerender();
     }
