@@ -43,8 +43,15 @@ Four sliders control the layout:
 - **Crop tolerance** — how much of each photo's edges may be trimmed to fill the page.
 - **Gutter** — spacing between photos.
 - **Min photo size** — below this, the density warning fires.
+- **Max photo size** — no photo's longer side may exceed this. Lower it to force
+  more photos per row: at 2.6 in a row of two landscape photos becomes impossible,
+  so the packer uses three or more. Caps pinned and hand-sized photos too.
 - **Density vs evenness** — how much row heights may differ. This is the one that
   most changes how a sheet looks.
+- **Photos per row** — an optional strict range, off by default. See below.
+- **Manual sizing** — a toggle. Off returns the sheet to automatic layout while
+  *remembering* any size you set by hand; switch it back on and your size returns.
+  Dragging a handle turns it on for you.
 
 Export as PDF or 300 DPI PNG, or print directly.
 
@@ -153,6 +160,33 @@ on its row, so there will be white space beside it. That is what asking for a bi
 photo means.
 
 Sizing survives saving and reopening a sheet.
+
+### Photos per row
+
+Leave it at `any` and the packer decides. Set a minimum and maximum to force a
+strict grid — the second field accepts `0` for "no upper limit".
+
+Fixing the row count and filling the page are in tension, because short rows leave
+whitespace. Measured with a 3–4 range:
+
+| photos | page fill |
+|---|---|
+| 3 | 19% |
+| 6 | 38% |
+| 12 | 74% |
+| 15 | 94% |
+| 18 or more | overflows, then scaled down |
+
+Some ranges are arithmetically impossible: five photos cannot be split into rows
+of three or four, since no row count satisfies it. Rather than failing, the limit
+relaxes — first the last row is allowed to be short, then the limit is dropped
+entirely — and the sheet says so.
+
+Pinned photos are exempt, because a pin means a row to itself and a minimum of
+three would otherwise make pinning impossible.
+
+**If your goal is just "these are too big", prefer Max photo size.** It gets you
+more per row without forcing whitespace, and it can never be impossible.
 
 ### When a sheet cannot fit
 
