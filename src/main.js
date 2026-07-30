@@ -10,6 +10,7 @@ export const state = {
   photos: [],
   page: { ...LETTER },
   manual: false,
+  selectedId: null,
 };
 
 // Exported so every layout() call site shares one definition of what the
@@ -34,7 +35,7 @@ export function rerender() {
   const avail = sheet.parentElement.clientHeight - 48;
   const scale = Math.min(1, avail / (state.page.heightIn * 96));
   previewScale = scale;
-  renderPreview(sheet, state.photos, placements, state.page, scale);
+  renderPreview(sheet, state.photos, placements, state.page, scale, state.selectedId);
 
   warningsEl.replaceChildren(
     ...warnings.map((w) => {
@@ -169,6 +170,7 @@ document.getElementById('load').addEventListener('click', async () => {
     state.photos = loaded.photos;
     state.page = loaded.page;
     state.manual = loaded.manual;
+    state.selectedId = null;
     rerender();
   } catch (e) {
     alert(`Load failed: ${e.message}`);

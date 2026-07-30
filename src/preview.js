@@ -2,7 +2,7 @@
 // in pixels from the same page spec the PDF uses, so what you see is what prints.
 export const SCREEN_DPI = 96;
 
-export function renderPreview(container, photos, placements, page, scale = 1) {
+export function renderPreview(container, photos, placements, page, scale = 1, selectedId = null) {
   const px = SCREEN_DPI * scale;
   container.style.width = `${page.widthIn * px}px`;
   container.style.height = `${page.heightIn * px}px`;
@@ -18,8 +18,16 @@ export function renderPreview(container, photos, placements, page, scale = 1) {
     box.className = 'absolute overflow-hidden bg-slate-200';
     box.dataset.photoId = pl.photoId;
     box.draggable = true;
-    box.classList.add('cursor-move', 'ring-0', 'hover:ring-2', 'ring-sky-400');
-    if (byId.get(pl.photoId)?.pinned) box.classList.add('ring-2', 'ring-amber-400');
+    const isSelected = pl.photoId === selectedId;
+    const isPinned = !!byId.get(pl.photoId)?.pinned;
+    box.classList.add('cursor-move');
+    if (isSelected) {
+      box.classList.add('ring-2', 'ring-white');
+    } else if (isPinned) {
+      box.classList.add('ring-0', 'hover:ring-2', 'ring-sky-400', 'ring-2', 'ring-amber-400');
+    } else {
+      box.classList.add('ring-0', 'hover:ring-2', 'ring-sky-400');
+    }
     box.style.left = `${pl.xIn * px}px`;
     box.style.top = `${pl.yIn * px}px`;
     box.style.width = `${pl.wIn * px}px`;

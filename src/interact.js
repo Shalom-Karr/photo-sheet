@@ -1,5 +1,22 @@
+const typing = (t) =>
+  t instanceof HTMLElement &&
+  (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+
 export function attachInteractions(container, state, rerender, currentScale) {
   let dragId = null;
+
+  function removePhoto(id) {
+    const i = state.photos.findIndex((p) => p.id === id);
+    if (i < 0) return;
+    URL.revokeObjectURL(state.photos[i].url);
+    state.photos.splice(i, 1);
+    if (state.selectedId === id) {
+      state.selectedId = state.photos.length > 0
+        ? state.photos[Math.min(i, state.photos.length - 1)].id
+        : null;
+    }
+    rerender();
+  }
 
   container.addEventListener('dragstart', (e) => {
     const box = e.target.closest('[data-photo-id]');
@@ -141,10 +158,32 @@ export function attachInteractions(container, state, rerender, currentScale) {
     const box = e.target.closest('[data-photo-id]');
     if (!box) return;
     e.preventDefault();
-    const i = state.photos.findIndex((p) => p.id === box.dataset.photoId);
-    if (i < 0) return;
-    URL.revokeObjectURL(state.photos[i].url);
-    state.photos.splice(i, 1);
+    removePhoto(box.dataset.photoId);
+  });
+
+  // Click on a photo box selects it; click on the sheet background clears selection.
+  // Clicks that land on a resize handle are ignored — pointerdown already starts
+  // a resize there and we must not let the bubbled click disturb the selection.
+  container.addEventListener('click', (e) => {
+    if (e.target.closest('[data-resize]')) return;
+    const box = e.target.closest('[data-photo-id]');
+    state.selectedId = box ? box.dataset.photoId : null;
     rerender();
+  });
+
+  // Backspace / Delete removes the selected photo; Escape clears selection.
+  // Registered on window so it works without the sheet being focusable.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      state.selectedId = null;
+      rerender();
+      return;
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      if (typing(e.target)) return;
+      if (!state.selectedId) return;
+      e.preventDefault();
+      removePhoto(state.selectedId);
+    }
   });
 }
