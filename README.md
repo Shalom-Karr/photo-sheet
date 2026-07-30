@@ -39,6 +39,8 @@ and the page will look dead with only a console error to explain why.
 | Delete the selected photo | `Backspace` or `Delete`. Deleting advances the selection, so you can keep pressing |
 | Clear the selection | `Escape`, or click the empty sheet |
 | Remove without selecting | Right click |
+| Undo | `Ctrl+Z` — covers adding, deleting, reordering, pinning, resizing and crop nudges |
+| Redo | `Ctrl+Shift+Z` or `Ctrl+Y` |
 | Save / reopen a sheet | Name it, **Save sheet**, then pick it from the list |
 
 Four sliders control the layout:
@@ -190,6 +192,22 @@ three would otherwise make pinning impossible.
 
 **If your goal is just "these are too big", prefer Max photo size.** It gets you
 more per row without forcing whitespace, and it can never be impossible.
+
+### Undo
+
+`Ctrl+Z` steps back through photo changes: adding, deleting, reordering, pinning,
+resizing and crop nudges. Fifty steps are kept. `Ctrl+Shift+Z` or `Ctrl+Y` redoes.
+
+Slider settings and the manual-sizing toggle are deliberately **not** on the undo
+stack — they are re-adjusted by dragging back, and including them would mean
+`Ctrl+Z` sometimes nudges a slider when you meant to restore a photo you deleted.
+Opening a saved sheet clears the history.
+
+One gesture is one step: a resize drag records once when you press, not once per
+mouse move, and a burst of crop nudges on the same photo collapses into a single
+entry.
+
+`Ctrl+Z` inside the sheet-name field does the normal text undo, not a layout undo.
 
 ### When a sheet cannot fit
 
