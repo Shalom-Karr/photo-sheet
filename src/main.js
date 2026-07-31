@@ -15,6 +15,7 @@ export const state = {
   selectedId: null,
   pageCount: 1,
   currentPage: 0,
+  zoom: null,          // null = fit to window; otherwise 1 = 100%
 };
 
 // Photos carry sheetPage; anything without one predates multi-page and belongs
@@ -38,13 +39,30 @@ const countEl = document.getElementById('count');
 
 let previewScale = 1;
 
+// Zoom stops, in screen-inches per printed inch. 1 is actual size at 96 CSS dpi.
+const ZOOM_STOPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+// Both axes matter: a landscape sheet is width-limited, a portrait one
+// height-limited, and using only height crops the sides on Tabloid landscape.
+function fitScale() {
+  const box = sheet.parentElement.parentElement; // wrapper -> <main>
+  const availH = box.clientHeight - 48;
+  const availW = box.clientWidth - 48;
+  return Math.min(
+    1,
+    availH / (state.page.heightIn * 96),
+    availW / (state.page.widthIn * 96),
+  );
+}
+
 export function rerender() {
   const { placements, warnings } = layout(photosForLayout(), state.page);
   document.getElementById('manual').checked = state.manual;
 
   // Fit the sheet to the viewport without changing any inch-space value.
-  const avail = sheet.parentElement.clientHeight - 48;
-  const scale = Math.min(1, avail / (state.page.heightIn * 96));
+  // state.zoom of null means "fit"; a number is an explicit ratio where 1 = 100%,
+  // i.e. one CSS inch on screen for one printed inch.
+  const scale = state.zoom ?? fitScale();
   previewScale = scale;
   renderPreview(sheet, state.photos, placements, state.page, scale, state.selectedId);
 
@@ -61,9 +79,52 @@ export function rerender() {
     : `${state.photos.length} photo${state.photos.length === 1 ? '' : 's'}`;
   syncHistoryButtons();
   syncPages();
+  syncZoom(scale);
   scheduleAutosave();
   return placements;
 }
+
+// ---- zoom --------------------------------------------------------------
+const zoomInBtn = document.getElementById('zoomIn');
+const zoomOutBtn = document.getElementById('zoomOut');
+const zoomFitBtn = document.getElementById('zoomFit');
+
+function syncZoom(scale) {
+  zoomFitBtn.textContent = state.zoom === null
+    ? `Fit ${Math.round(scale * 100)}%`
+    : `${Math.round(scale * 100)}%`;
+  zoomInBtn.disabled = scale >= ZOOM_STOPS[ZOOM_STOPS.length - 1] - 1e-9;
+  zoomOutBtn.disabled = scale <= ZOOM_STOPS[0] + 1e-9;
+}
+
+function setZoom(next) {
+  state.zoom = next;
+  rerender();
+}
+
+// Step from wherever the view currently is, so the first click after "Fit"
+// moves one stop from the fitted size rather than jumping to a preset.
+function stepZoom(dir) {
+  const current = state.zoom ?? fitScale();
+  const next = dir > 0
+    ? ZOOM_STOPS.find((z) => z > current + 1e-9)
+    : [...ZOOM_STOPS].reverse().find((z) => z < current - 1e-9);
+  if (next !== undefined) setZoom(next);
+}
+
+zoomInBtn.addEventListener('click', () => stepZoom(1));
+zoomOutBtn.addEventListener('click', () => stepZoom(-1));
+zoomFitBtn.addEventListener('click', () => setZoom(state.zoom === null ? 1 : null));
+
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key === '=' || e.key === '+') { e.preventDefault(); stepZoom(1); }
+  else if (e.key === '-') { e.preventDefault(); stepZoom(-1); }
+  else if (e.key === '0') { e.preventDefault(); setZoom(null); }
+});
+
+// Refit only while following the window; an explicit zoom should survive a resize.
+window.addEventListener('resize', () => { if (state.zoom === null) rerender(); });
 
 // The keyboard shortcuts in interact.js already call rerender(), so routing the
 // button states through here keeps them correct however history changes -

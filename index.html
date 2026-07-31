@@ -104,8 +104,22 @@
       </div>
     </aside>
 
-    <main class="flex-1 grid place-items-center overflow-auto p-6">
-      <div id="sheet" class="relative bg-white shadow-2xl"></div>
+    <main class="relative flex-1 overflow-auto">
+      <!-- Wrapper centres the sheet while it fits and lets it overflow in both
+           axes when zoomed. place-items-center alone clips the top-left of an
+           oversized child, putting part of the page permanently out of reach. -->
+      <div class="min-w-full min-h-full w-fit grid place-items-center p-6">
+        <div id="sheet" class="relative bg-white shadow-2xl"></div>
+      </div>
+
+      <div class="sticky bottom-4 left-0 ml-4 mr-auto w-fit flex items-center gap-1 rounded-full bg-slate-800/90 backdrop-blur px-2 py-1 shadow-lg">
+        <button id="zoomOut" title="Zoom out (Ctrl+-)"
+          class="w-7 h-7 rounded-full hover:bg-slate-700 disabled:opacity-40 text-sm">−</button>
+        <button id="zoomFit" title="Fit to window"
+          class="px-2 h-7 rounded-full hover:bg-slate-700 text-xs tabular-nums min-w-[4rem]">Fit</button>
+        <button id="zoomIn" title="Zoom in (Ctrl+=)"
+          class="w-7 h-7 rounded-full hover:bg-slate-700 disabled:opacity-40 text-sm">+</button>
+      </div>
     </main>
   </div>
 
