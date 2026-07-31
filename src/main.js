@@ -6,6 +6,7 @@ import { downloadPng } from './export-png.js';
 import { attachInteractions } from './interact.js';
 import { saveProject, listProjects, loadProject } from './project.js';
 import { record, clear, undo, redo, canUndo, canRedo } from './history.js';
+import { snapshot, listVersions, restoreVersion } from './autosave.js';
 
 export const state = {
   photos: [],
@@ -60,6 +61,7 @@ export function rerender() {
     : `${state.photos.length} photo${state.photos.length === 1 ? '' : 's'}`;
   syncHistoryButtons();
   syncPages();
+  scheduleAutosave();
   return placements;
 }
 
@@ -355,7 +357,79 @@ document.getElementById('load').addEventListener('click', async () => {
   }
 });
 
+// ---- autosave and recovery --------------------------------------------
+// Debounced so a drag writes one version when it settles, not one per frame.
+const AUTOSAVE_MS = 2500;
+let saveTimer = null;
+let saving = false;
+
+async function saveNow() {
+  if (saving) return;
+  saving = true;
+  try {
+    await snapshot(state);
+    await refreshVersions();
+  } catch (e) {
+    console.warn('Autosave failed:', e);   // never interrupt editing
+  } finally {
+    saving = false;
+  }
+}
+
+export function scheduleAutosave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, AUTOSAVE_MS);
+}
+
+// pagehide fires on tab close, navigation and mobile app-switch; visibilitychange
+// covers backgrounding. Neither can await an async write, so the debounced save
+// above is the real guarantee - these just shorten the window.
+window.addEventListener('pagehide', () => { void saveNow(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') void saveNow();
+});
+
+const versionList = document.getElementById('versionList');
+const restoreBtn = document.getElementById('restore');
+
+async function refreshVersions() {
+  const versions = await listVersions();
+  restoreBtn.disabled = versions.length === 0;
+  versionList.replaceChildren(
+    ...versions.map((v) => {
+      const o = document.createElement('option');
+      o.value = v.name;
+      const when = new Date(v.savedAt);
+      const pages = v.pageCount > 1 ? `, ${v.pageCount} pages` : '';
+      o.textContent = `${when.toLocaleString()} — ${v.photoCount} photo${v.photoCount === 1 ? '' : 's'}${pages}`;
+      return o;
+    }),
+  );
+}
+
+restoreBtn.addEventListener('click', async () => {
+  if (!versionList.value) return;
+  if (state.photos.length &&
+      !confirm('Replace the current sheet with this saved version?')) return;
+  try {
+    const loaded = await restoreVersion(versionList.value);
+    syncSliders(loaded.page);
+    state.photos.forEach((p) => URL.revokeObjectURL(p.url));
+    state.photos = loaded.photos;
+    state.page = loaded.page;
+    state.manual = loaded.manual;
+    state.pageCount = loaded.pageCount;
+    state.currentPage = 0;
+    state.selectedId = null;
+    clear();
+    rerender();
+  } catch (e) {
+    alert(`Restore failed: ${e.message}`);
+  }
+});
+
 refreshProjects();
+refreshVersions();
 
 syncPageControls(state.page);
 rerender();

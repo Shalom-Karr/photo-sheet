@@ -92,7 +92,12 @@
       <p id="count" class="text-xs text-slate-400"></p>
 
       <div class="space-y-2 pt-2 border-t border-slate-700">
-        <input id="projName" placeholder="Sheet name" class="w-full rounded bg-slate-700 px-2 py-1 text-sm">
+        <p class="text-xs text-slate-400 pt-1">Recover a past version</p>
+        <select id="versionList" class="w-full rounded bg-slate-700 px-2 py-1 text-sm"></select>
+        <button id="restore" class="w-full rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:hover:bg-slate-600 px-3 py-2 text-sm transition">Restore version</button>
+        <p class="text-xs text-slate-500">Saved automatically as you work, and when you close the tab.</p>
+
+        <input id="projName" placeholder="Sheet name" class="w-full rounded bg-slate-700 px-2 py-1 text-sm mt-2">
         <button id="save" class="w-full rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Save sheet</button>
         <select id="projList" class="w-full rounded bg-slate-700 px-2 py-1 text-sm"></select>
         <button id="load" class="w-full rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Open sheet</button>
