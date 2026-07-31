@@ -17,6 +17,26 @@
         <p class="text-xs text-slate-400">or paste with Ctrl+V, or drag files onto the sheet</p>
       </div>
 
+      <div class="flex gap-2">
+        <button id="undo" title="Undo (Ctrl+Z)"
+          class="flex-1 rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:hover:bg-slate-600 px-3 py-2 text-sm transition">↶ Undo</button>
+        <button id="redo" title="Redo (Ctrl+Y)"
+          class="flex-1 rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:hover:bg-slate-600 px-3 py-2 text-sm transition">↷ Redo</button>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-700 pt-3">
+        <label class="block text-sm">Page size
+          <select id="pageSize" class="mt-1 w-full rounded bg-slate-700 px-2 py-1.5 text-sm"></select>
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input id="landscape" type="checkbox" class="accent-sky-500">
+          Landscape
+        </label>
+        <label class="block text-sm">Margin: <span id="marginVal">0.25</span> in
+          <input id="margin" type="range" min="0" max="100" value="25" class="w-full">
+        </label>
+      </div>
+
       <label class="block text-sm">Crop tolerance: <span id="cropVal">6</span>%
         <input id="crop" type="range" min="0" max="20" value="6" class="w-full">
       </label>

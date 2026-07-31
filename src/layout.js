@@ -11,6 +11,42 @@ export const LETTER = {
   maxPerRow: 0,
 };
 
+// Paper sizes, portrait. Orientation is applied by swapping width and height,
+// so each entry is stored once. maxPhotoIn defaults to the long edge: a photo
+// can never usefully exceed the page it sits on.
+export const PAGE_SIZES = {
+  letter: { label: 'Letter — 8.5 × 11 in', widthIn: 8.5, heightIn: 11 },
+  a4: { label: 'A4 — 8.27 × 11.69 in', widthIn: 8.27, heightIn: 11.69 },
+  legal: { label: 'Legal — 8.5 × 14 in', widthIn: 8.5, heightIn: 14 },
+  tabloid: { label: 'Tabloid — 11 × 17 in', widthIn: 11, heightIn: 17 },
+  a3: { label: 'A3 — 11.69 × 16.54 in', widthIn: 11.69, heightIn: 16.54 },
+  '4x6': { label: '4 × 6 in', widthIn: 4, heightIn: 6 },
+  '5x7': { label: '5 × 7 in', widthIn: 5, heightIn: 7 },
+  '8x10': { label: '8 × 10 in', widthIn: 8, heightIn: 10 },
+  square: { label: 'Square — 8 × 8 in', widthIn: 8, heightIn: 8 },
+};
+
+/**
+ * Returns a page object for the given size and orientation, preserving every
+ * layout setting the user has already tuned. Only the paper changes.
+ */
+export function applyPageSize(page, sizeKey, landscape = false) {
+  const size = PAGE_SIZES[sizeKey];
+  if (!size) return page;
+  const widthIn = landscape ? size.heightIn : size.widthIn;
+  const heightIn = landscape ? size.widthIn : size.heightIn;
+  return {
+    ...page,
+    widthIn,
+    heightIn,
+    // A max larger than the sheet is meaningless, and leaving a Letter-sized
+    // 11in cap on a 4x6 card silently disables the control.
+    maxPhotoIn: Math.min(page.maxPhotoIn, Math.max(widthIn, heightIn)),
+    // Half-inch margins on a 4x6 leave almost nothing to place photos in.
+    marginIn: Math.min(page.marginIn, Math.min(widthIn, heightIn) / 12),
+  };
+}
+
 // Photos in a row share height h. Their widths plus gutters must equal contentW:
 //   h * Σaspect + (n-1) * gutter = contentW
 export function rowHeight(aspects, contentW, gutterIn) {

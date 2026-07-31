@@ -1,11 +1,11 @@
-import { layout, LETTER } from './layout.js';
+import { layout, LETTER, PAGE_SIZES, applyPageSize } from './layout.js';
 import { renderPreview } from './preview.js';
 import { attachIngest } from './photos.js';
 import { downloadPdf, printPdf } from './export-pdf.js';
 import { downloadPng } from './export-png.js';
 import { attachInteractions } from './interact.js';
 import { saveProject, listProjects, loadProject } from './project.js';
-import { record, clear } from './history.js';
+import { record, clear, undo, redo, canUndo, canRedo } from './history.js';
 
 export const state = {
   photos: [],
@@ -46,8 +46,23 @@ export function rerender() {
     }),
   );
   countEl.textContent = `${state.photos.length} photo${state.photos.length === 1 ? '' : 's'}`;
+  syncHistoryButtons();
   return placements;
 }
+
+// The keyboard shortcuts in interact.js already call rerender(), so routing the
+// button states through here keeps them correct however history changes -
+// buttons, shortcuts, project load, or a fresh photo import.
+const undoBtn = document.getElementById('undo');
+const redoBtn = document.getElementById('redo');
+
+function syncHistoryButtons() {
+  undoBtn.disabled = !canUndo();
+  redoBtn.disabled = !canRedo();
+}
+
+undoBtn.addEventListener('click', () => { if (undo(state)) rerender(); });
+redoBtn.addEventListener('click', () => { if (redo(state)) rerender(); });
 
 function bindSlider(id, labelId, toValue, key, fmt) {
   const el = document.getElementById(id);
@@ -87,6 +102,64 @@ document.getElementById('maxPerRow').addEventListener('input', updatePerRow);
 
 document.getElementById('manual').addEventListener('change', (e) => {
   state.manual = e.target.checked;
+  rerender();
+});
+
+// ---- page size ---------------------------------------------------------
+const pageSizeEl = document.getElementById('pageSize');
+const landscapeEl = document.getElementById('landscape');
+const marginEl = document.getElementById('margin');
+const marginValEl = document.getElementById('marginVal');
+
+pageSizeEl.replaceChildren(
+  ...Object.entries(PAGE_SIZES).map(([key, size]) => {
+    const o = document.createElement('option');
+    o.value = key;
+    o.textContent = size.label;
+    return o;
+  }),
+);
+
+/** Which preset matches the current page, in either orientation. */
+function currentSizeKey(page) {
+  const w = Math.round(page.widthIn * 100);
+  const h = Math.round(page.heightIn * 100);
+  for (const [key, s] of Object.entries(PAGE_SIZES)) {
+    const sw = Math.round(s.widthIn * 100);
+    const sh = Math.round(s.heightIn * 100);
+    if ((w === sw && h === sh) || (w === sh && h === sw)) return key;
+  }
+  return null;
+}
+
+function applyPage() {
+  state.page = applyPageSize(state.page, pageSizeEl.value, landscapeEl.checked);
+  syncPageControls(state.page);
+  rerender();
+}
+
+function syncPageControls(page) {
+  const key = currentSizeKey(page);
+  if (key) pageSizeEl.value = key;
+  landscapeEl.checked = page.widthIn > page.heightIn;
+  marginEl.value = Math.round(page.marginIn * 100);
+  marginValEl.textContent = page.marginIn.toFixed(2);
+  // The max-size slider tops out at the page's long edge, so the control stays
+  // meaningful on a 4x6 instead of spending most of its travel out of range.
+  const maxEl = document.getElementById('maxsize');
+  maxEl.max = Math.round(Math.max(page.widthIn, page.heightIn) * 10);
+  if (Number(maxEl.value) > Number(maxEl.max)) {
+    maxEl.value = maxEl.max;
+    document.getElementById('maxVal').textContent = (Number(maxEl.max) / 10).toFixed(1);
+  }
+}
+
+pageSizeEl.addEventListener('change', applyPage);
+landscapeEl.addEventListener('change', applyPage);
+
+marginEl.addEventListener('input', () => {
+  state.page.marginIn = Number(marginEl.value) / 100;
+  marginValEl.textContent = state.page.marginIn.toFixed(2);
   rerender();
 });
 
@@ -135,6 +208,7 @@ function syncSliders(page) {
   document.getElementById('minPerRow').value = min;
   document.getElementById('maxPerRow').value = max;
   document.getElementById('perRowVal').textContent = perRowLabel(min, max);
+  syncPageControls(page);
 }
 
 async function refreshProjects() {
@@ -182,4 +256,5 @@ document.getElementById('load').addEventListener('click', async () => {
 
 refreshProjects();
 
+syncPageControls(state.page);
 rerender();
