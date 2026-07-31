@@ -12,13 +12,22 @@ export const state = {
   page: { ...LETTER },
   manual: false,
   selectedId: null,
+  pageCount: 1,
+  currentPage: 0,
 };
+
+// Photos carry sheetPage; anything without one predates multi-page and belongs
+// on the first sheet.
+export function photosOnPage(index) {
+  return state.photos.filter((p) => (p.sheetPage ?? 0) === index);
+}
 
 // Exported so every layout() call site shares one definition of what the
 // toggle means. Suspending rather than clearing keeps the user's size.
-export function photosForLayout() {
-  if (state.manual) return state.photos;
-  return state.photos.map((p) =>
+export function photosForLayout(pageIndex = state.currentPage) {
+  const onPage = photosOnPage(pageIndex);
+  if (state.manual) return onPage;
+  return onPage.map((p) =>
     p.targetHeightIn == null ? p : { ...p, targetHeightIn: null });
 }
 
@@ -45,8 +54,12 @@ export function rerender() {
       return li;
     }),
   );
-  countEl.textContent = `${state.photos.length} photo${state.photos.length === 1 ? '' : 's'}`;
+  const here = photosOnPage(state.currentPage).length;
+  countEl.textContent = state.pageCount > 1
+    ? `${here} on this page · ${state.photos.length} total`
+    : `${state.photos.length} photo${state.photos.length === 1 ? '' : 's'}`;
   syncHistoryButtons();
+  syncPages();
   return placements;
 }
 
@@ -63,6 +76,87 @@ function syncHistoryButtons() {
 
 undoBtn.addEventListener('click', () => { if (undo(state)) rerender(); });
 redoBtn.addEventListener('click', () => { if (redo(state)) rerender(); });
+
+// ---- pages -------------------------------------------------------------
+const pageTabs = document.getElementById('pageTabs');
+const addPageBtn = document.getElementById('addPage');
+const movePageSel = document.getElementById('movePage');
+const deletePageBtn = document.getElementById('deletePage');
+
+function syncPages() {
+  pageTabs.replaceChildren(
+    ...Array.from({ length: state.pageCount }, (_, i) => {
+      const b = document.createElement('button');
+      const on = i === state.currentPage;
+      b.textContent = String(i + 1);
+      b.title = `Page ${i + 1} — ${photosOnPage(i).length} photo(s)`;
+      b.className =
+        'w-8 h-8 rounded text-sm transition ' +
+        (on ? 'bg-sky-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300');
+      b.addEventListener('click', () => {
+        state.currentPage = i;
+        state.selectedId = null;
+        rerender();
+      });
+      return b;
+    }),
+  );
+
+  // Moving is only meaningful with a selection and somewhere to move it to.
+  const sel = state.photos.find((p) => p.id === state.selectedId);
+  movePageSel.disabled = !sel || state.pageCount < 2;
+  movePageSel.replaceChildren(
+    ...(() => {
+      const opts = [Object.assign(document.createElement('option'),
+        { value: '', textContent: sel ? 'Move selected to…' : 'Select a photo first' })];
+      for (let i = 0; i < state.pageCount; i++) {
+        if (i === state.currentPage) continue;
+        opts.push(Object.assign(document.createElement('option'),
+          { value: String(i), textContent: `Page ${i + 1}` }));
+      }
+      return opts;
+    })(),
+  );
+  movePageSel.value = '';
+  deletePageBtn.disabled = state.pageCount < 2;
+}
+
+addPageBtn.addEventListener('click', () => {
+  record(state);
+  state.pageCount += 1;
+  state.currentPage = state.pageCount - 1;
+  state.selectedId = null;
+  rerender();
+});
+
+movePageSel.addEventListener('change', () => {
+  const target = movePageSel.value;
+  if (target === '') return;
+  const photo = state.photos.find((p) => p.id === state.selectedId);
+  if (!photo) return;
+  record(state);
+  photo.sheetPage = Number(target);
+  // Follow the photo: landing on the page you sent it to is what makes this
+  // feel like moving something rather than making it vanish.
+  state.currentPage = Number(target);
+  rerender();
+});
+
+deletePageBtn.addEventListener('click', () => {
+  if (state.pageCount < 2) return;
+  const doomed = state.currentPage;
+  const onIt = photosOnPage(doomed).length;
+  if (onIt && !confirm(`Delete page ${doomed + 1} and its ${onIt} photo(s)?`)) return;
+  record(state);
+  state.photos = state.photos
+    .filter((p) => (p.sheetPage ?? 0) !== doomed)
+    // Everything after the deleted page shifts down one.
+    .map((p) => ((p.sheetPage ?? 0) > doomed ? { ...p, sheetPage: p.sheetPage - 1 } : p));
+  state.pageCount -= 1;
+  state.currentPage = Math.min(doomed, state.pageCount - 1);
+  state.selectedId = null;
+  rerender();
+});
 
 function bindSlider(id, labelId, toValue, key, fmt) {
   const el = document.getElementById(id);
@@ -167,15 +261,20 @@ attachInteractions(sheet, state, rerender, () => previewScale);
 
 attachIngest(document.body, document.getElementById('pick'), ({ photos, rejected }) => {
   record(state);
-  state.photos.push(...photos);
+  // New photos land on the page you are looking at, not always the first.
+  state.photos.push(...photos.map((p) => ({ ...p, sheetPage: state.currentPage })));
   rerender();
   if (rejected.length) alert(rejected.join('\n'));
 });
 
-function exportHandler(label, fn) {
+// PDF gets every page; PNG is a single canvas, so it exports the visible one.
+function exportHandler(label, fn, allPages = false) {
   return async () => {
     try {
-      const { placements } = layout(photosForLayout(), state.page);
+      const placements = allPages
+        ? Array.from({ length: state.pageCount },
+            (_, i) => layout(photosForLayout(i), state.page).placements)
+        : layout(photosForLayout(), state.page).placements;
       await fn(state.photos, placements, state.page);
     } catch (e) {
       console.error(e);
@@ -184,9 +283,9 @@ function exportHandler(label, fn) {
   };
 }
 
-document.getElementById('pdf').addEventListener('click', exportHandler('PDF export', downloadPdf));
+document.getElementById('pdf').addEventListener('click', exportHandler('PDF export', downloadPdf, true));
 document.getElementById('png').addEventListener('click', exportHandler('PNG export', downloadPng));
-document.getElementById('print').addEventListener('click', exportHandler('Print', printPdf));
+document.getElementById('print').addEventListener('click', exportHandler('Print', printPdf, true));
 
 const projList = document.getElementById('projList');
 
@@ -246,6 +345,8 @@ document.getElementById('load').addEventListener('click', async () => {
     state.photos = loaded.photos;
     state.page = loaded.page;
     state.manual = loaded.manual;
+    state.pageCount = loaded.pageCount ?? 1;
+    state.currentPage = 0;
     state.selectedId = null;
     clear();
     rerender();

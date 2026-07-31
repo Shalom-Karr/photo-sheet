@@ -41,12 +41,28 @@ async function embedPhoto(doc, photo) {
   return doc.embedPng(pngBytes);
 }
 
+/**
+ * `placements` may be a single array (one sheet) or an array of arrays (one
+ * entry per sheet). Accepting both keeps every existing caller working while
+ * multi-page callers pass the nested form.
+ */
 export async function buildPdf(photos, placements, page) {
+  const sheets = Array.isArray(placements[0]) || placements.length === 0
+    ? placements
+    : [placements];
   const doc = await PDFDocument.create();
-  const pdfPage = doc.addPage([page.widthIn * PT, page.heightIn * PT]);
   const byId = new Map(photos.map((p) => [p.id, p]));
-  // Cache embedded images so the same photo used twice is embedded once.
   const cache = new Map();
+  for (const sheet of sheets.length ? sheets : [[]]) {
+    await drawSheet(doc, sheet, page, byId, cache);
+  }
+  return doc.save();
+}
+
+// byId and cache are passed in so a photo used on two pages is embedded once
+// for the whole document, not once per page.
+async function drawSheet(doc, placements, page, byId, cache) {
+  const pdfPage = doc.addPage([page.widthIn * PT, page.heightIn * PT]);
 
   for (const pl of placements) {
     const photo = byId.get(pl.photoId);
@@ -80,7 +96,6 @@ export async function buildPdf(photos, placements, page) {
     pdfPage.pushOperators(popGraphicsState());
   }
 
-  return doc.save();
 }
 
 function blobUrl(bytes) {

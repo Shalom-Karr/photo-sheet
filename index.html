@@ -25,6 +25,16 @@
       </div>
 
       <div class="space-y-2 border-t border-slate-700 pt-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm">Pages</span>
+          <button id="addPage" class="rounded bg-sky-600 hover:bg-sky-500 px-2 py-1 text-xs">+ Add page</button>
+        </div>
+        <div id="pageTabs" class="flex flex-wrap gap-1"></div>
+        <select id="movePage" class="w-full rounded bg-slate-700 px-2 py-1 text-sm disabled:opacity-40"></select>
+        <button id="deletePage" class="w-full rounded bg-slate-700 hover:bg-red-700 disabled:opacity-40 disabled:hover:bg-slate-700 px-3 py-1.5 text-xs transition">Delete this page</button>
+      </div>
+
+      <div class="space-y-2 border-t border-slate-700 pt-3">
         <label class="block text-sm">Page size
           <select id="pageSize" class="mt-1 w-full rounded bg-slate-700 px-2 py-1.5 text-sm"></select>
         </label>

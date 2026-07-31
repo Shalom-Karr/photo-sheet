@@ -53,7 +53,11 @@ export async function saveProject(state, name) {
       cropOffset: p.cropOffset,
       pinned: p.pinned,
       targetHeightIn: p.targetHeightIn ?? null,
+      // Which sheet page this photo sits on. Absent in v1 manifests, where
+      // everything was implicitly page 0.
+      sheetPage: p.sheetPage ?? 0,
     })),
+    pageCount: state.pageCount ?? 1,
   };
 
   for (const p of state.photos) await writeBlob(projDir, `${p.id}.bin`, p.blob);
@@ -91,8 +95,17 @@ export async function loadProject(name) {
     const blob = new Blob([await file.arrayBuffer()], { type: meta.mime });
     // Default first so a manifest written before orientation existed loads as
     // unrotated rather than undefined.
-    photos.push({ orientation: 1, targetHeightIn: null, ...meta, blob, url: URL.createObjectURL(blob) });
+    photos.push({ orientation: 1, targetHeightIn: null, sheetPage: 0, ...meta, blob, url: URL.createObjectURL(blob) });
   }
   // Spread defaults first so old saved sheets missing newer fields get them.
-  return { page: { maxPhotoIn: 11, ...manifest.page }, photos, manual: manifest.manual ?? false };
+  // Derive the count from the photos too, so a manifest that lost pageCount
+  // still opens with every page intact rather than orphaning photos.
+  const highest = photos.reduce((m, p) => Math.max(m, p.sheetPage ?? 0), 0);
+  const pageCount = Math.max(manifest.pageCount ?? 1, highest + 1);
+  return {
+    page: { maxPhotoIn: 11, ...manifest.page },
+    photos,
+    manual: manifest.manual ?? false,
+    pageCount,
+  };
 }
